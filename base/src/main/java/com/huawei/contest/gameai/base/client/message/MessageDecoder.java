@@ -67,7 +67,7 @@ public class MessageDecoder {
      * @return 消息名称
      */
     public String getMessageName() {
-        return Objects.toString(jsonObject.getString("name"), "");
+        return Objects.toString(jsonObject.getString("msg_name"), "");
     }
 
     /**
@@ -76,7 +76,7 @@ public class MessageDecoder {
      * @return 消息数据
      */
     public synchronized String getMessageData() {
-        return Objects.toString(jsonObject.getString("data"), "");
+        return Objects.toString(jsonObject.getString("msg_data"), "");
     }
 
     public String getReceivingMessage() {

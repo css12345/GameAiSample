@@ -9,6 +9,6 @@ public class ReadyMessage extends Message<Ready> {
 
     public ReadyMessage(Ready data) {
         super(data);
-        this.name = "ready";
+        this.name = "gameReady";
     }
 }

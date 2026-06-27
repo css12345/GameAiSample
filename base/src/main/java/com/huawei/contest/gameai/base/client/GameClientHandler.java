@@ -24,11 +24,11 @@ import java.util.ArrayList;
 
 @Slf4j
 public class GameClientHandler extends SimpleChannelInboundHandler<String> {
-    private static final String GAME_START = "start";
+    private static final String GAME_START = "gameStart";
 
     private static final String GAME_INQUIRE = "inquire";
 
-    private static final String GAME_OVER = "over";
+    private static final String GAME_OVER = "gameOver";
 
     private final MessageDecoder messageDecoder = new MessageDecoder();
 

@@ -5,8 +5,7 @@ import lombok.Setter;
 
 @Getter
 @Setter
-public class StartPlayer {
-    private Integer playerId;
-
-    private ObjectIdRange objectIdRange;
+public class ObjectIdRange {
+    private int min;
+    private int max;
 }
