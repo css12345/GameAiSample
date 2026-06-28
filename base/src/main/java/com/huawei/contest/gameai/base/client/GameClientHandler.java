@@ -101,6 +101,7 @@ public class GameClientHandler extends SimpleChannelInboundHandler<String> {
     private ReadyMessage prepareForGame(Start gameStart) {
         Ready gameReady = new Ready();
         gameReady.setPlayerId(gameRegistration.getPlayerId());
+        log.info("gameStart is {}", gameStart);
         // TODO: 完成游戏准备操作
         return new ReadyMessage(gameReady);
     }
@@ -109,6 +110,7 @@ public class GameClientHandler extends SimpleChannelInboundHandler<String> {
         Actions gameActions = new Actions();
         gameActions.setPlayerId(gameRegistration.getPlayerId());
         gameActions.setRound(gameInquire.getRound());
+        log.info("gameInquire is {}", gameInquire);
         // TODO: 添加行动动作
         gameActions.setActions(new ArrayList<>());
         return new ActionsMessage(gameActions);
