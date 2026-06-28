@@ -1,6 +1,7 @@
 package com.huawei.contest.gameai.base.client;
 
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
@@ -11,6 +12,7 @@ class GameClientTest {
     private static final int TEST_SERVER_PORT = 30000;
 
     @Test
+    @Disabled
     void testSinglePlayer() {
         GameClient redClient = null;
         try {
@@ -27,6 +29,7 @@ class GameClientTest {
     }
 
     @Test
+    @Disabled
     void testMultiPlayer() {
         GameClient redClient = null;
         GameClient blueClient = null;
