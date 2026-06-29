@@ -3,7 +3,7 @@ package com.huawei.contest.gameai.base.client.entity;
 public class GameUnit implements IUnit {
     private final int id;
     private final int playerId;
-    private final UnitType type;
+    public final UnitType type;
     private final Position pos;
     private final int hp;
 

@@ -1,8 +1,10 @@
 package com.huawei.contest.gameai.base.client.entity;
 
+import lombok.Data;
 import lombok.EqualsAndHashCode;
 
 @EqualsAndHashCode
+@Data
 public class Position {
     private final int x, y;
     public Position(int x, int y) {
@@ -16,5 +18,9 @@ public class Position {
 
     public int chebyshev(Position other) {
         return Math.max(Math.abs(x - other.x), Math.abs(y - other.y));
+    }
+
+    public Position add(int dx, int dy) {
+        return Position.of(x + dx, y + dy);
     }
 }

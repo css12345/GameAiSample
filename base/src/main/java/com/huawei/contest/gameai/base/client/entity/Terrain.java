@@ -5,7 +5,7 @@ public enum Terrain {
     STATION('1', false),
     MINER('2', false),
     FIGHTER('3', false),
-    ROCKETEER('4', false),
+    ROCKET('4', false),
     MEDIC('5', false),
     GUARDIAN('6', false),
     GOLD_MINE('7', false),

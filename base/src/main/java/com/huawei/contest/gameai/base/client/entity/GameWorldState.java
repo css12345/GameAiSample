@@ -1,6 +1,7 @@
 package com.huawei.contest.gameai.base.client.entity;
 
 import com.huawei.contest.gameai.base.client.model.*;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.*;
@@ -16,6 +17,7 @@ public class GameWorldState implements IWorldState {
     private StartPlayer opponent;
 
     private int round;
+    @Getter
     private final Map<Integer, GameUnit> units = new HashMap<>();
     private final Map<Integer, GameBase> bases = new HashMap<>();
     private final Map<Integer, GameResource> resources = new HashMap<>();

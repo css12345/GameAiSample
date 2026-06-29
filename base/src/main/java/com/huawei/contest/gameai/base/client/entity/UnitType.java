@@ -1,5 +1,7 @@
 package com.huawei.contest.gameai.base.client.entity;
 
+import lombok.Getter;
+
 public enum UnitType {
     MINER("miner", 70, 0, 1),
     FIGHTER("fighter", 150, 14, 1),
@@ -8,8 +10,11 @@ public enum UnitType {
     GUARDIAN("guardian", 800, 12, 3);
 
     final String name;
+    @Getter
     final int maxHp;
+    @Getter
     final int damage;
+    @Getter
     final int attackRange;
 
     UnitType(String name, int maxHp, int damage, int attackRange) {
@@ -17,18 +22,6 @@ public enum UnitType {
         this.maxHp = maxHp;
         this.damage = damage;
         this.attackRange = attackRange;
-    }
-
-    public int getMaxHp() {
-        return maxHp;
-    }
-
-    public int getDamage() {
-        return damage;
-    }
-
-    public int getAttackRange() {
-        return attackRange;
     }
 
     public static UnitType of(String name) {
