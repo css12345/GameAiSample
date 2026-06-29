@@ -12,5 +12,5 @@ import java.util.List;
 @ToString
 public class Inquire {
     private int round;
-    private List<Object> objects = new ArrayList<>();
+    private List<RoleInformation> objects = new ArrayList<>();
 }
