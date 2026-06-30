@@ -42,6 +42,39 @@ public class MovementCoordinatorStressTest {
         assertThat(next).isNotEqualTo(u.getPos());
     }
 
+    @Test
+    void twoUnitShouldMoveTowardsTargetAlongOpenPath() {
+        Start start = buildStart("0,0,1,0,9,a", 3, 2);
+
+
+        AIConfig config = AIConfig.aggressiveRush();
+        ReservationTable globalResTable = new ReservationTable();
+        Set<Position> globalVacated = new HashSet<>();
+
+        GameWorldState gameWorldState = GameWorldState.fromMapString(start, 1111);
+        MovementCoordinator movementCoordinator = new MovementCoordinator(gameWorldState);
+
+        GameUnit u1 = new GameUnit(101, 1111, UnitType.FIGHTER, Position.of(0, 0), 100);
+        GameUnit u2 = new GameUnit(102, 1111, UnitType.FIGHTER, Position.of(0, 1), 100);
+        gameWorldState.getUnits().put(u1.getId(), u1);
+        Map<Integer, Position> steps = movementCoordinator.planSquadMovement(List.of(u1, u2), Position.of(2, 1), Collections.emptyList(),  // 无敌人
+                0.5, config, globalResTable, globalVacated);
+
+        assertThat(steps).containsKey(101);
+        Position next1 = steps.get(101);
+        assertThat(next1.getX()).isEqualTo(0);
+        assertThat(next1.getY()).isEqualTo(1);
+        // 第一步不可能是原地（除非无路，但此处有路）
+        assertThat(next1).isNotEqualTo(u1.getPos());
+
+        assertThat(steps).containsKey(102);
+        Position next2 = steps.get(102);
+        assertThat(next2.getX()).isEqualTo(1);
+        assertThat(next2.getY()).isEqualTo(1);
+        // 第一步不可能是原地（除非无路，但此处有路）
+        assertThat(next2).isNotEqualTo(u2.getPos());
+    }
+
     private static @NonNull Start buildStart(String data, int maxX, int maxY) {
         Start start = new Start();
 

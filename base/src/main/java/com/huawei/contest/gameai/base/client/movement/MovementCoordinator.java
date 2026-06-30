@@ -27,14 +27,14 @@ public class MovementCoordinator {
      * @param aggressiveness 激进程度 0-1
      * @param config AI配置
      * @param globalResTable 全局预留表，跨小队共享
-     * @param globalVacateds 全局腾空哈希集合，跨小队共享
+     * @param globalVacates 全局腾空哈希集合，跨小队共享
      * @return 每个单位的下一步位置
      */
     public Map<Integer, Position> planSquadMovement(List<IUnit> squadUnits, Position targetCenter,
                                                     List<IUnit> enemies, double aggressiveness, AIConfig config,
-                                                    ReservationTable globalResTable, Set<Position> globalVacateds) {
+                                                    ReservationTable globalResTable, Set<Position> globalVacates) {
         // 设置 graph 使用全局腾空集合
-        graph.setVacatedPositions(globalVacateds);
+        graph.setVacatedPositions(globalVacates);
 
         // 预占用：所有己方单位当前格 step=0 预留
         for (IUnit u : squadUnits) {
@@ -94,7 +94,7 @@ public class MovementCoordinator {
             if (path != null && !path.isEmpty()) {
                 paths.put(unit.getId(), path);
                 // 成功移动，原位置加入全局腾空集合
-                globalVacateds.add(unit.getPos());
+                globalVacates.add(unit.getPos());
                 // 标记路径到全局预留表
                 markPath(unit.getId(), path, globalResTable);
             } else {
