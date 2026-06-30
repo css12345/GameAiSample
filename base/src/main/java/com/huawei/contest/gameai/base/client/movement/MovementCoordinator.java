@@ -1,12 +1,16 @@
 package com.huawei.contest.gameai.base.client.movement;
 
 import com.huawei.contest.gameai.base.client.AIConfig;
+import com.huawei.contest.gameai.base.client.entity.GameUnit;
 import com.huawei.contest.gameai.base.client.entity.GameWorldState;
 import com.huawei.contest.gameai.base.client.entity.IUnit;
 import com.huawei.contest.gameai.base.client.entity.Position;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
+@Slf4j
 public class MovementCoordinator {
     private GameWorldState world;
     private GridGraph graph;
@@ -49,6 +53,7 @@ public class MovementCoordinator {
         double threshold = config.getPathMaxDangerThreshold() + (1 - aggressiveness) * 2.0;
         astar.setDangerWeight(dangerWeight);
         astar.setMaxDangerThreshold(threshold);
+        log.debug("A*参数: dangerWeight={}, maxDangerThreshold={}", dangerWeight, threshold);
 
         // ========= 排序：狭窄通道依赖排序 =========
         List<IUnit> sorted = new ArrayList<>(squadUnits);
@@ -56,24 +61,23 @@ public class MovementCoordinator {
         int dirX = Integer.signum(targetCenter.getX() - squadCenter.getX());
         int dirY = Integer.signum(targetCenter.getY() - squadCenter.getY());
 
+        log.debug("小队中心=({},{}), 方向=({},{}), 目标=({},{})",
+                squadCenter.getX(), squadCenter.getY(), dirX, dirY,
+                targetCenter.getX(), targetCenter.getY());
+
         if (dirX == 0 && dirY == 0) {
-            // 已达目标附近，使用原有距离排序
             sorted.sort(Comparator.comparingInt(u ->
                     (u.getDamage() > 10 ? 0 : 10) + u.getPos().chebyshev(targetCenter)));
         } else {
-            // 构建位置->单位映射
             Map<Position, IUnit> posToUnit = new HashMap<>();
             for (IUnit u : sorted) posToUnit.put(u.getPos(), u);
 
-            // 阻挡者计数：在前进方向上且离目标更近的友军数量
             Map<IUnit, Integer> blockerCount = new HashMap<>();
             for (IUnit u : sorted) {
                 int blockers = 0;
                 for (int dx = -1; dx <= 1; dx++) {
                     for (int dy = -1; dy <= 1; dy++) {
-                        if (dx == 0 && dy == 0)  {
-                            continue;
-                        }
+                        if (dx == 0 && dy == 0) continue;
                         Position adj = u.getPos().add(dx, dy);
                         IUnit other = posToUnit.get(adj);
                         if (other != null && adj.chebyshev(targetCenter) < u.getPos().chebyshev(targetCenter)) {
@@ -84,10 +88,14 @@ public class MovementCoordinator {
                 blockerCount.put(u, blockers);
             }
 
-            // 按阻挡者数量升序，相同则按伤害优先级+距离
             sorted.sort(Comparator.<IUnit>comparingInt(u -> blockerCount.getOrDefault(u, 0))
                     .thenComparingInt(u -> (u.getDamage() > 10 ? 0 : 10) + u.getPos().chebyshev(targetCenter)));
         }
+
+        log.debug("规划顺序: {}", sorted.stream()
+                .map(u -> String.format("%d@(%d,%d)", u.getId(),
+                        u.getPos().getX(), u.getPos().getY()))
+                .collect(Collectors.joining(" → ")));
 
         // ========= 依次规划 =========
         Map<Integer, List<Position>> paths = new LinkedHashMap<>();
@@ -95,12 +103,16 @@ public class MovementCoordinator {
             List<Position> path = astar.search(unit, targetCenter);
             if (path != null && !path.isEmpty()) {
                 paths.put(unit.getId(), path);
-                // 成功移动，原位置加入全局腾空集合
                 globalVacates.add(unit.getPos());
-                // 标记路径到全局预留表
                 markPath(unit.getId(), path, globalResTable);
+                log.debug("单位 id={} 规划成功, 路径={}步, 第一步→({},{})",
+                        unit.getId(), path.size(),
+                        path.get(0).getX(), path.get(0).getY());
             } else {
                 paths.put(unit.getId(), null);
+                log.warn("单位 id={} (pos=({},{})) 无法找到到目标({},{})的路径",
+                        unit.getId(), unit.getPos().getX(), unit.getPos().getY(),
+                        targetCenter.getX(), targetCenter.getY());
             }
         }
 

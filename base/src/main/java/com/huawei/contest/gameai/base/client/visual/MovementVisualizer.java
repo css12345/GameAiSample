@@ -62,12 +62,17 @@ public class MovementVisualizer extends JFrame {
         scrollPane.getHorizontalScrollBar().setUnitIncrement(24);
         add(scrollPane, BorderLayout.CENTER);
 
-        // 右侧: 控制面板 + 图例
+        // 右侧: 控制面板 + 图例（包裹在滚动面板中防止截断）
         JPanel rightPanel = new JPanel();
         rightPanel.setLayout(new BoxLayout(rightPanel, BoxLayout.Y_AXIS));
         rightPanel.add(controlPanel);
         rightPanel.add(createLegendPanel());
-        add(rightPanel, BorderLayout.EAST);
+
+        JScrollPane rightScroll = new JScrollPane(rightPanel);
+        rightScroll.setPreferredSize(new Dimension(275, 800));
+        rightScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        rightScroll.getVerticalScrollBar().setUnitIncrement(16);
+        add(rightScroll, BorderLayout.EAST);
 
         add(statusBar, BorderLayout.SOUTH);
         setJMenuBar(createMenuBar());
@@ -91,6 +96,7 @@ public class MovementVisualizer extends JFrame {
         panel.add(legendItem("   金矿", new Color(0xFF, 0xD7, 0x00)));
         panel.add(legendItem("   宝石矿", new Color(0x41, 0x69, 0xE1)));
         panel.add(legendItem("   基地", new Color(0x00, 0xCD, 0xCD)));
+        panel.add(legendItem("   守护者", new Color(0x8B, 0x00, 0x8B)));
 
         // 单位
         panel.add(legendTitle("══ 单位 ══"));
@@ -162,11 +168,16 @@ public class MovementVisualizer extends JFrame {
         return switch (code) {
             case '0' -> "空地";
             case '1' -> "基地";
+            case '2' -> "矿工位";
+            case '3' -> "战士位";
+            case '4' -> "火箭位";
+            case '5' -> "医疗位";
+            case '6' -> "守护者";
             case '7' -> "金矿";
             case '8' -> "宝石矿";
             case '9' -> "树木";
             case 'a' -> "高山";
-            default -> "?" + code;
+            default -> "未知" + code;
         };
     }
 
@@ -214,9 +225,12 @@ public class MovementVisualizer extends JFrame {
     private void loadAndRefresh(String mapName) {
         try {
             sim.loadMap(mapName);
-            renderPanel.resetView();
-            renderPanel.repaint();
-            controlPanel.updateStepLabel();
+            // 延迟调用 fitCellSize，确保布局已完成
+            SwingUtilities.invokeLater(() -> {
+                renderPanel.resetView();
+                renderPanel.repaint();
+                controlPanel.updateStepLabel();
+            });
             statusLabel.setText("已加载地图: " + mapName + " ("
                     + sim.getWorld().getWidth() + "×" + sim.getWorld().getHeight() + ")");
         } catch (Exception ex) {

@@ -5,13 +5,16 @@ import com.huawei.contest.gameai.base.client.entity.*;
 import com.huawei.contest.gameai.base.client.movement.MovementCoordinator;
 import com.huawei.contest.gameai.base.client.movement.ReservationTable;
 import com.huawei.contest.gameai.base.client.model.Start;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 /**
  * 移动模拟引擎 — 封装 MovementCoordinator，管理模拟状态，暴露可视化数据。
  */
+@Slf4j
 public class MovementSimulator {
 
     private static final AtomicInteger ID_GEN = new AtomicInteger(1000);
@@ -130,19 +133,34 @@ public class MovementSimulator {
         List<IUnit> squadUnits = new ArrayList<>(myUnits.values());
         List<IUnit> enemies = new ArrayList<>(enemyUnits.values());
 
+        // ===== 日志：规划开始 =====
+        log.info("========== 移动规划开始 ==========");
+        log.info("地图: {}x{}", world.getWidth(), world.getHeight());
+        log.info("目标位置: ({}, {})", target.getX(), target.getY());
+        log.info("攻击性: {}, 危险权重: {}, 最大危险阈值: {}",
+                String.format("%.2f", aggressiveness), config.getPathDangerWeight(), config.getPathMaxDangerThreshold());
+
+        String unitList = squadUnits.stream()
+                .map(u -> String.format("%s(id=%d, pos=(%d,%d))",
+                        ((GameUnit)u).type.name(), u.getId(), u.getPos().getX(), u.getPos().getY()))
+                .collect(Collectors.joining(", "));
+        log.info("己方单位 ({}个): [{}]", squadUnits.size(), unitList);
+
+        String enemyList = enemies.stream()
+                .map(u -> String.format("%s(id=%d, pos=(%d,%d))",
+                        ((GameUnit)u).type.name(), u.getId(), u.getPos().getX(), u.getPos().getY()))
+                .collect(Collectors.joining(", "));
+        log.info("敌方单位 ({}个): [{}]", enemies.size(), enemyList);
+
         firstSteps = coordinator.planSquadMovement(
                 squadUnits, target, enemies, aggressiveness, config, resTable, vacated);
 
-        // 从 SpaceTimeAStar 获取完整路径
+        // 从预留表重建完整路径
         fullPaths = new LinkedHashMap<>();
-        // 由于 MovementCoordinator 内部为每个单位调用 SpaceTimeAStar.search()，
-        // 我们重新为每个单位规划以获取完整路径（使用相同参数）
-        // 这里通过访问 lastAStar 来获取信息
         for (GameUnit u : myUnits.values()) {
             List<Position> path = new ArrayList<>();
             Position next = firstSteps.get(u.getId());
             if (next != null && !next.equals(u.getPos())) {
-                // 从预留表中重建路径
                 path = reconstructPathFromReservations(u.getId());
                 if (path.isEmpty()) {
                     path.add(next);
@@ -150,7 +168,24 @@ public class MovementSimulator {
                 maxPathLen = Math.max(maxPathLen, path.size());
             }
             fullPaths.put(u.getId(), path);
+
+            // ===== 日志：每个单位的路径 =====
+            if (!path.isEmpty()) {
+                String pathStr = path.stream()
+                        .map(p -> String.format("(%d,%d)", p.getX(), p.getY()))
+                        .collect(Collectors.joining(" → "));
+                log.info("单位 {} ({}id={}) 路径 ({}步): 起点({},{}) → {}",
+                        u.type.name(), u.getPlayerId() == myPlayerId ? "" : "敌",
+                        u.getId(), path.size(),
+                        u.getPos().getX(), u.getPos().getY(), pathStr);
+            } else {
+                log.info("单位 {} (id={}) 无法到达目标，保持在 ({},{})",
+                        u.type.name(), u.getId(), u.getPos().getX(), u.getPos().getY());
+            }
         }
+
+        log.info("最长路径: {} 步", maxPathLen);
+        log.info("========== 移动规划结束 ==========");
 
         // 记录初始快照 (step 0)
         recordSnapshot();

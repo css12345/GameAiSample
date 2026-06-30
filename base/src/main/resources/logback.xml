@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- 移动规划相关日志: INFO 级别输出关键信息 -->
+    <logger name="com.huawei.contest.gameai.base.client.visual.MovementSimulator" level="INFO"/>
+    <logger name="com.huawei.contest.gameai.base.client.movement.MovementCoordinator" level="DEBUG"/>
+
+    <root level="WARN">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+</configuration>

@@ -260,32 +260,40 @@ public class MapRenderPanel extends JPanel {
 
     private void drawCoordinateLabels(Graphics2D g2, int w, int h) {
         g2.setColor(COLOR_AXIS_TEXT);
-        Font axisFont = new Font("SansSerif", Font.PLAIN, Math.max(9, Math.min(11, cellSize * 9 / 20)));
+        int fontSize = Math.max(9, Math.min(12, cellSize * 9 / 20));
+        Font axisFont = new Font("SansSerif", Font.PLAIN, fontSize);
         g2.setFont(axisFont);
         FontMetrics fm = g2.getFontMetrics();
 
-        // X 轴标签（底部）
-        int yBottom = gridToScreenY(0) + cellSize + AXIS_MARGIN / 2 + fm.getAscent() / 2;
-        // 标注频率：根据缩放级别决定每隔几个格子标一次
-        int step = Math.max(1, 30 / cellSize);
+        // 标注频率：每 5 格标一次（最小 1 格）
+        int step = Math.max(1, 5);
+        // 如果格子很大，则每格都标
+        if (cellSize >= 26) step = 1;
+        else if (cellSize >= 18) step = 2;
+
+        // X 轴标签 — 绘制在底部坐标轴背景正中
+        int yBottomLine = gridToScreenY(0) + cellSize;        // 网格底部线
+        int yBottomText = yBottomLine + AXIS_MARGIN / 2 + fm.getAscent() / 2 - 2;
         for (int x = 0; x < w; x += step) {
             int sx = gridToScreenX(x) + cellSize / 2;
             String label = String.valueOf(x);
-            g2.drawString(label, sx - fm.stringWidth(label) / 2, yBottom);
+            int tx = sx - fm.stringWidth(label) / 2;
+            g2.drawString(label, tx, yBottomText);
         }
 
-        // Y 轴标签（左侧）
-        int xLeft = panX + AXIS_MARGIN / 2;
+        // Y 轴标签 — 绘制在左侧坐标轴背景正中
+        int xLeftLine = gridToScreenX(0);                      // 网格左侧线
         for (int y = 0; y < h; y += step) {
             int sy = gridToScreenY(y) + cellSize / 2 + fm.getAscent() / 2 - 1;
             String label = String.valueOf(y);
-            g2.drawString(label, xLeft - fm.stringWidth(label) / 2, sy);
+            int labelW = fm.stringWidth(label);
+            g2.drawString(label, xLeftLine - AXIS_MARGIN / 2 - labelW / 2, sy);
         }
 
-        // 原点标注 "x,y"
-        g2.setFont(new Font("SansSerif", Font.BOLD, 10));
-        g2.drawString("x→", gridToScreenX(w - 1) + cellSize + 2, yBottom);
-        g2.drawString("y↑", xLeft - 6, gridToScreenY(h - 1) - 4);
+        // 轴方向箭头
+        g2.setFont(new Font("SansSerif", Font.BOLD, 11));
+        g2.drawString("x→", gridToScreenX(w - 1) + cellSize + 4, yBottomText);
+        g2.drawString("y↑", xLeftLine - AXIS_MARGIN / 2 - 10, gridToScreenY(h - 1) - 5);
     }
 
     private void drawHoverHighlight(Graphics2D g2, Position cell) {
@@ -316,6 +324,8 @@ public class MapRenderPanel extends JPanel {
         return switch (code) {
             case '0' -> COLOR_EMPTY;
             case '1' -> COLOR_STATION;
+            case '2', '3', '4', '5' -> COLOR_EMPTY; // 矿工/战士/火箭/医疗（地图上的初始单位位）
+            case '6' -> COLOR_GUARDIAN;               // 守护者（中立单位）
             case '7' -> COLOR_GOLDMINE;
             case '8' -> COLOR_GEMMINE;
             case '9' -> COLOR_TREE;
@@ -537,8 +547,53 @@ public class MapRenderPanel extends JPanel {
     public void resetView() {
         panX = 0;
         panY = 0;
-        cellSize = 24;
+        fitCellSize();
         repaint();
+    }
+
+    /** 根据可视区域自动计算合适的 cellSize，确保地图 + 坐标轴完整可见 */
+    private void fitCellSize() {
+        if (sim == null || sim.getWorld() == null) {
+            cellSize = 24;
+            return;
+        }
+        int w = sim.getWorld().getWidth();
+        int h = sim.getWorld().getHeight();
+
+        // 获取可视区域大小（JScrollPane 的 viewport 或面板自身）
+        Container parent = getParent();
+        int viewW, viewH;
+        if (parent instanceof JViewport vp) {
+            viewW = vp.getExtentSize().width;
+            viewH = vp.getExtentSize().height;
+        } else {
+            viewW = getWidth();
+            viewH = getHeight();
+        }
+
+        // 减去坐标轴边距
+        int availW = viewW - AXIS_MARGIN - 4;
+        int availH = viewH - AXIS_MARGIN - 4;
+
+        if (availW <= 0 || availH <= 0) {
+            cellSize = 24;
+            return;
+        }
+
+        int fitW = availW / w;
+        int fitH = availH / h;
+        cellSize = Math.max(8, Math.min(48, Math.min(fitW, fitH)));
+
+        // 更新面板 preferred size，确保 ScrollPane 滚动条覆盖坐标轴区域
+        updatePreferredSize(w, h);
+    }
+
+    /** 根据地图大小 + 坐标轴边距更新面板的 preferred size */
+    private void updatePreferredSize(int w, int h) {
+        int pw = w * cellSize + AXIS_MARGIN + 40; // +40 给右侧留空
+        int ph = h * cellSize + AXIS_MARGIN + 40;
+        setPreferredSize(new Dimension(pw, ph));
+        revalidate();
     }
 
     public Position getHoveredCell() { return hoveredCell; }
