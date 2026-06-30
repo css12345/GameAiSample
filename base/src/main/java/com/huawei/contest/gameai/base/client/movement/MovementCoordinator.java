@@ -12,6 +12,7 @@ public class MovementCoordinator {
     private GridGraph graph;
     private ThreatMap threatMap;
     private int maxSteps = 10;
+    private SpaceTimeAStar lastAStar;
 
     public MovementCoordinator(GameWorldState world) {
         this.world = world;
@@ -43,6 +44,7 @@ public class MovementCoordinator {
 
         threatMap.update(enemies);
         SpaceTimeAStar astar = new SpaceTimeAStar(graph, globalResTable, maxSteps, world, threatMap);
+        this.lastAStar = astar;
         double dangerWeight = config.getPathDangerWeight() - (config.getPathDangerWeight() - config.getAggressiveDangerMod()) * aggressiveness;
         double threshold = config.getPathMaxDangerThreshold() + (1 - aggressiveness) * 2.0;
         astar.setDangerWeight(dangerWeight);
@@ -134,4 +136,10 @@ public class MovementCoordinator {
     public void cleanup() {
         graph.setVacatedPositions(Collections.emptySet());
     }
+
+    /** 获取最后使用的 SpaceTimeAStar 实例，用于可视化 A* 搜索过程 */
+    public SpaceTimeAStar getLastAStar() { return lastAStar; }
+
+    /** 获取威胁地图，用于可视化热力图层 */
+    public ThreatMap getThreatMap() { return threatMap; }
 }

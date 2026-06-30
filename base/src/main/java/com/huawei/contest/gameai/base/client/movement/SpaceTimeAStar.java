@@ -8,6 +8,7 @@ import com.huawei.contest.gameai.base.client.entity.Position;
 import lombok.Setter;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 public class SpaceTimeAStar {
     private final GridGraph graph;
@@ -18,6 +19,7 @@ public class SpaceTimeAStar {
     private double dangerWeight = 3.0;
     @Setter
     private double maxDangerThreshold = 1.5;
+    private final Set<String> visitedNodes = new HashSet<>();
 
     public SpaceTimeAStar(GridGraph graph, ReservationTable resTable, int maxSteps,
                    GameWorldState world, ThreatMap threatMap) {
@@ -28,6 +30,7 @@ public class SpaceTimeAStar {
     }
 
     public List<Position> search(IUnit unit, Position target) {
+        visitedNodes.clear();
         GridNode startNode = new GridNode(unit.getPos().getX(), unit.getPos().getY());
         GridNode targetNode = new GridNode(target.getX(), target.getY());
 
@@ -37,7 +40,9 @@ public class SpaceTimeAStar {
         SpaceTimeNode start = new SpaceTimeNode(startNode, 0,
                 heuristic(startNode, targetNode) + getDangerCost(startNode), null, 0);
         open.add(start);
-        visited.put(stateKey(startNode.getX(), startNode.getY(), 0), start);
+        String startKey = stateKey(startNode.getX(), startNode.getY(), 0);
+        visited.put(startKey, start);
+        visitedNodes.add(startKey);
 
         while (!open.isEmpty()) {
             SpaceTimeNode current = open.poll();
@@ -76,6 +81,7 @@ public class SpaceTimeAStar {
                 SpaceTimeNode neighborNode = new SpaceTimeNode(next, nextStep, newG + newH, current, newG);
                 open.add(neighborNode);
                 visited.put(key, neighborNode);
+                visitedNodes.add(key);
             }
         }
         return null;
@@ -102,6 +108,16 @@ public class SpaceTimeAStar {
         }
         if (!path.isEmpty()) path.removeFirst(); // 移除起点
         return path;
+    }
+
+    /** 返回 A* 搜索过程中访问过的所有 (x, y, step) 位置，用于可视化调试 */
+    public Set<Position> getVisitedPositions() {
+        return visitedNodes.stream()
+                .map(key -> {
+                    String[] parts = key.split(",");
+                    return Position.of(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]));
+                })
+                .collect(Collectors.toSet());
     }
 
     private String stateKey(int x, int y, int step) { return x + "," + y + "," + step; }
