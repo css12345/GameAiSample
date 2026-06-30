@@ -20,9 +20,9 @@ public class SpaceTimeAStar {
     @Setter
     private double maxDangerThreshold = 1.5;
     private final Set<String> visitedNodes = new HashSet<>();
-    /** 节点展开上限：超过则放弃（防止无解时搜索空间爆炸） */
+    /** 节点展开上限：超过则回退到最接近目标的已探索节点。25K 平衡速度与路径质量 */
     @Setter
-    private int maxExpansions = 200_000;
+    private int maxExpansions = 25_000;
 
     public SpaceTimeAStar(GridGraph graph, ReservationTable resTable, int maxSteps,
                    GameWorldState world, ThreatMap threatMap) {
@@ -47,16 +47,28 @@ public class SpaceTimeAStar {
         visited.put(startKey, start);
         visitedNodes.add(startKey);
 
+        // 追踪最接近目标的节点（用于失败时的 best-effort 回退）
+        SpaceTimeNode bestNode = null;
+        int bestDist = Integer.MAX_VALUE;
+
         int expansions = 0;
         while (!open.isEmpty()) {
             SpaceTimeNode current = open.poll();
+            int curDist = chebyshevDist(current.node, targetNode);
+            if (curDist < bestDist && current.step > 0) {
+                bestDist = curDist;
+                bestNode = current;
+            }
             // 终止条件：至少移动一步，且距离目标切比雪夫距离<=1
-            if (current.step > 0 && chebyshevDist(current.node, targetNode) <= 1) {
+            if (current.step > 0 && curDist <= 1) {
                 return reconstructPath(current);
             }
             if (current.step >= maxSteps) continue;
-            // 节点展开预算耗尽 → 快速失败，避免 UI 卡死
+            // 节点展开预算耗尽 → 回退到最佳节点，至少靠近目标
             if (++expansions > maxExpansions) {
+                if (bestNode != null && bestDist < chebyshevDist(startNode, targetNode)) {
+                    return reconstructPath(bestNode);
+                }
                 return null;
             }
 
@@ -91,6 +103,11 @@ public class SpaceTimeAStar {
                 visited.put(key, neighborNode);
                 visitedNodes.add(key);
             }
+        }
+
+        // 搜索空间耗尽：回退到最佳节点
+        if (bestNode != null && bestDist < chebyshevDist(startNode, targetNode)) {
+            return reconstructPath(bestNode);
         }
         return null;
     }

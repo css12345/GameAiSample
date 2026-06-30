@@ -50,6 +50,30 @@ public class MovementSimulator {
         Start start = MapDataLoader.buildStart(mapName, myPlayerId, enemyPlayerId);
         this.world = GameWorldState.fromMapString(start, myPlayerId);
         reset();
+        // 解析地图中的守护者作为威胁源
+        parseGuardians();
+    }
+
+    /** 扫描地图数据中的守护者('6')，加入敌方列表作为威胁源 */
+    private void parseGuardians() {
+        if (world == null || rawMapData == null) return;
+        String[] tokens = rawMapData.split(",");
+        int h = world.getHeight();
+        int w = world.getWidth();
+        for (int mapY = 0; mapY < h; mapY++) {
+            int worldY = h - 1 - mapY;
+            for (int worldX = 0; worldX < w; worldX++) {
+                int idx = mapY * w + worldX;
+                if (idx < tokens.length && tokens[idx].trim().equals("6")) {
+                    // 创建守护者单位（playerId=-1 表示中立），用于威胁图计算
+                    int gid = ID_GEN.incrementAndGet();
+                    GameUnit guardian = new GameUnit(gid, -1, UnitType.GUARDIAN,
+                            Position.of(worldX, worldY), UnitType.GUARDIAN.getMaxHp());
+                    enemyUnits.put(gid, guardian);
+                }
+            }
+        }
+        syncUnitsToWorld();
     }
 
     public void loadCustomMap(int width, int height, String mapData) {
@@ -161,9 +185,11 @@ public class MovementSimulator {
         for (GameUnit u : myUnits.values()) {
             List<Position> path = new ArrayList<>();
             Position next = firstSteps.get(u.getId());
-            if (next != null && !next.equals(u.getPos())) {
+            if (next != null) {
+                // 从预留表重建路径（即使第一步是原地等待，后续也会移动）
                 path = reconstructPathFromReservations(u.getId());
-                if (path.isEmpty()) {
+                if (path.isEmpty() && !next.equals(u.getPos())) {
+                    // 预留表中没有完整路径（可能只有1步），用第一步兜底
                     path.add(next);
                 }
                 maxPathLen = Math.max(maxPathLen, path.size());
@@ -171,7 +197,9 @@ public class MovementSimulator {
             fullPaths.put(u.getId(), path);
 
             // ===== 日志：每个单位的路径 =====
-            if (!path.isEmpty()) {
+            // 过滤掉纯等待路径（仅包含起点位置没有实际移动的）
+            boolean realMove = !path.isEmpty() && !(path.size() == 1 && path.get(0).equals(u.getPos()));
+            if (realMove) {
                 int maxShow = 30; // 最多显示前30步
                 String pathStr;
                 if (path.size() <= maxShow) {
@@ -187,12 +215,13 @@ public class MovementSimulator {
                             .collect(Collectors.joining(" → "));
                     pathStr = head + " → ...(" + (path.size() - 18) + "步)... → " + tail;
                 }
-                log.info("单位 {} ({}id={}) 路径 ({}步): 起点({},{}) → {}",
+                String waitNote = path.get(0).equals(u.getPos()) ? " (第1步原地等待)" : "";
+                log.info("单位 {} ({}id={}) 路径 ({}步){}: 起点({},{}) → {}",
                         u.type.name(), u.getPlayerId() == myPlayerId ? "" : "敌",
-                        u.getId(), path.size(),
+                        u.getId(), path.size(), waitNote,
                         u.getPos().getX(), u.getPos().getY(), pathStr);
             } else {
-                log.info("单位 {} (id={}) 无法到达目标，保持在 ({},{})",
+                log.info("单位 {} (id={}) 完全无法移动，保持在 ({},{})",
                         u.type.name(), u.getId(), u.getPos().getX(), u.getPos().getY());
             }
         }
@@ -204,11 +233,12 @@ public class MovementSimulator {
         recordSnapshot();
     }
 
-    /** 从预留表中重建单位路径（跳过连续相同位置，仅记录实际移动） */
+    /** 从预留表中重建单位路径（跳过 step=0 起始位置 + 连续相同位置） */
     private List<Position> reconstructPathFromReservations(int unitId) {
         List<Position> path = new ArrayList<>();
         Position lastAdded = null;
         for (var entry : resTable.getUnitReservations(unitId, world.getWidth())) {
+            if (entry.getKey() == 0) continue; // step=0 是预占的起始位置，不是移动步骤
             Position cur = entry.getValue();
             if (!cur.equals(lastAdded)) {
                 path.add(cur);

@@ -53,6 +53,12 @@ public class MovementCoordinator {
             globalResTable.reserve(0, u.getPos().getX(), u.getPos().getY(), world.getWidth(), u.getId());
         }
 
+        // 把己方所有起始位置标记为"腾空"，允许单位穿过彼此起点。
+        // step=0 已被上述预留保护，后续 step 不会冲突。
+        for (IUnit u : squadUnits) {
+            globalVacates.add(u.getPos());
+        }
+
         threatMap.update(enemies);
         SpaceTimeAStar astar = new SpaceTimeAStar(graph, globalResTable, maxSteps, world, threatMap);
         this.lastAStar = astar;
@@ -112,12 +118,18 @@ public class MovementCoordinator {
                 paths.put(unit.getId(), path);
                 globalVacates.add(unit.getPos());
                 markPath(unit.getId(), path, globalResTable);
-                log.debug("单位 id={} 规划成功, 路径={}步, 第一步→({},{})",
-                        unit.getId(), path.size(),
-                        path.get(0).getX(), path.get(0).getY());
+                Position lastPos = path.get(path.size() - 1);
+                int finalDist = lastPos.chebyshev(targetCenter);
+                if (finalDist <= 1) {
+                    log.debug("单位 id={} 规划成功, 路径={}步, 到达({},{})距离目标={}",
+                            unit.getId(), path.size(), lastPos.getX(), lastPos.getY(), finalDist);
+                } else {
+                    log.debug("单位 id={} 尽力靠近, 路径={}步, 到达({},{})距离目标={} (目标周围已满)",
+                            unit.getId(), path.size(), lastPos.getX(), lastPos.getY(), finalDist);
+                }
             } else {
                 paths.put(unit.getId(), null);
-                log.warn("单位 id={} (pos=({},{})) 无法找到到目标({},{})的路径",
+                log.warn("单位 id={} (pos=({},{})) 完全无法向目标({},{})靠近",
                         unit.getId(), unit.getPos().getX(), unit.getPos().getY(),
                         targetCenter.getX(), targetCenter.getY());
             }

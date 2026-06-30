@@ -171,8 +171,9 @@ public class MovementCoordinatorStressTest {
         }
         log.info("  成功移动: {}/{} (仅最近单位成功)", moved10, miners.size());
 
-        // maxSteps=10 时仅有最近单位成功（旧行为确认为 bug）
-        assertThat(moved10).as("maxSteps=10时仅最近单位成功").isEqualTo(1);
+        // maxSteps=10 时至少最近单位成功（best-effort 可能让更多单位靠近目标）
+        assertThat(moved10).as("maxSteps=10时最近单位应成功，best-effort可能让更多单位靠近")
+                .isGreaterThanOrEqualTo(1);
     }
 
     /** 从 classpath 资源加载地图文件 */
@@ -293,6 +294,78 @@ public class MovementCoordinatorStressTest {
         // 第一步也不应重叠
         Set<Position> uniqueFirstSteps = new HashSet<>(firstSteps.values());
         assertThat(uniqueFirstSteps.size()).as("第一个步位置应唯一").isEqualTo(units.size());
+    }
+
+    /**
+     * 验证单位被完全堵死时 firstStep 等于起点（不假造移动）。
+     *
+     * <p>场景：2×3 地图，目标 (0,0)。9 个单位挤在周围，
+     * 后面的单位所有可行邻居都被预留，只能原地不动。
+     */
+    @Test
+    void blockedUnit_shouldNotFakeMovement() {
+        // 3×3 开放地图
+        Start start = buildStart("0,0,0,0,0,0,0,0,0", 3, 3);
+        GameWorldState world = GameWorldState.fromMapString(start, 1111);
+
+        Position target = Position.of(0, 0);
+
+        // 大量单位挤在目标周围，逐个规划会把目标附近所有格子都锁定
+        List<GameUnit> units = new ArrayList<>();
+        int id = 100;
+        // 8 个单位分布在目标周围 + 密集区域
+        int[][] positions = {{0,1}, {1,0}, {1,1}, {2,1}, {2,0}, {1,2}, {0,2}, {2,2}};
+        for (int[] p : positions) {
+            units.add(new GameUnit(++id, 1111, UnitType.FIGHTER, Position.of(p[0], p[1]), 100));
+        }
+        units.forEach(u -> world.getUnits().put(u.getId(), u));
+        world.refreshOccupied();
+
+        MovementCoordinator mc = new MovementCoordinator(world);
+        mc.setMaxSteps(8);
+        ReservationTable rt = new ReservationTable();
+        Set<Position> vacated = new HashSet<>();
+
+        Map<Integer, Position> firstSteps = mc.planSquadMovement(
+                new ArrayList<>(units), target, Collections.emptyList(), 0.0,
+                AIConfig.aggressiveRush(), rt, vacated);
+
+        // 统计有多少单位被完全堵死
+        long blocked = 0;
+        long moved = 0;
+        for (GameUnit u : units) {
+            Position step = firstSteps.get(u.getId());
+            if (step != null && !step.equals(u.getPos())) {
+                moved++;
+            } else {
+                blocked++;
+                log.info("被堵死: 单位 {} @({},{})", u.getId(), u.getPos().getX(), u.getPos().getY());
+            }
+        }
+
+        log.info("移动到目标({},{}): 成功={}, 堵死={}", target.getX(), target.getY(), moved, blocked);
+        // 起始位置腾空后，单位可穿过彼此起点，大多数应找到路径
+        assertThat(moved).as("起始位置腾空后大部分单位应找到路径").isGreaterThanOrEqualTo(2);
+        for (GameUnit u : units) {
+            Position step = firstSteps.get(u.getId());
+            if (step != null && step.equals(u.getPos())) {
+                log.info("被堵死: 单位 {} @({},{})", u.getId(), u.getPos().getX(), u.getPos().getY());
+                // 确认没有假造的移动记录
+                boolean hasRealReservation = false;
+                for (int s = 1; s <= 8 && !hasRealReservation; s++) {
+                    for (int x = 0; x < 3 && !hasRealReservation; x++) {
+                        for (int y = 0; y < 3 && !hasRealReservation; y++) {
+                            Position pos = Position.of(x, y);
+                            if (!pos.equals(u.getPos()) && rt.getReservation(s, x, y, 3) == u.getId()) {
+                                hasRealReservation = true;
+                            }
+                        }
+                    }
+                }
+                assertThat(hasRealReservation)
+                        .as("被堵死单位不应假造移动记录").isFalse();
+            }
+        }
     }
 
 }

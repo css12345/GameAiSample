@@ -142,6 +142,9 @@ public class MapRenderPanel extends JPanel {
         int[] grid = screenToGrid(e.getX(), e.getY());
         if (grid == null) return;
         int gx = grid[0], gy = grid[1];
+        // 不能放在障碍物（树木、高山、金矿、宝石矿、守护者）上
+        if (sim.isObstacle(gx, gy)) return;
+
         if (placingEnemy) {
             sim.addEnemyUnit(selectedUnitType, gx, gy);
         } else {

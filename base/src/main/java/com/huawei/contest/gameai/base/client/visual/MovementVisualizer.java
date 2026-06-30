@@ -93,10 +93,10 @@ public class MovementVisualizer extends JFrame {
         panel.add(legendItem("   空地", new Color(0xF0, 0xF0, 0xF0)));
         panel.add(legendItem("   树木", new Color(0x22, 0x8B, 0x22)));
         panel.add(legendItem("   高山", new Color(0x69, 0x69, 0x69)));
-        panel.add(legendItem("   金矿", new Color(0xFF, 0xD7, 0x00)));
-        panel.add(legendItem("   宝石矿", new Color(0x41, 0x69, 0xE1)));
+        panel.add(legendItem("   金矿(障碍)", new Color(0xFF, 0xD7, 0x00)));
+        panel.add(legendItem("   宝石矿(障碍)", new Color(0x41, 0x69, 0xE1)));
         panel.add(legendItem("   基地", new Color(0x00, 0xCD, 0xCD)));
-        panel.add(legendItem("   守护者", new Color(0x8B, 0x00, 0x8B)));
+        panel.add(legendItem("   守护者(障碍)", new Color(0x8B, 0x00, 0x8B)));
 
         // 单位
         panel.add(legendTitle("══ 单位 ══"));
