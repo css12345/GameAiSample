@@ -137,8 +137,9 @@ public class MovementSimulator {
         log.info("========== 移动规划开始 ==========");
         log.info("地图: {}x{}", world.getWidth(), world.getHeight());
         log.info("目标位置: ({}, {})", target.getX(), target.getY());
-        log.info("攻击性: {}, 危险权重: {}, 最大危险阈值: {}",
-                String.format("%.2f", aggressiveness), config.getPathDangerWeight(), config.getPathMaxDangerThreshold());
+        log.info("攻击性: {}, 危险权重: {}, 最大危险阈值: {}, maxSteps: {}",
+                String.format("%.2f", aggressiveness), config.getPathDangerWeight(),
+                config.getPathMaxDangerThreshold(), coordinator.getMaxSteps());
 
         String unitList = squadUnits.stream()
                 .map(u -> String.format("%s(id=%d, pos=(%d,%d))",
@@ -171,9 +172,21 @@ public class MovementSimulator {
 
             // ===== 日志：每个单位的路径 =====
             if (!path.isEmpty()) {
-                String pathStr = path.stream()
-                        .map(p -> String.format("(%d,%d)", p.getX(), p.getY()))
-                        .collect(Collectors.joining(" → "));
+                int maxShow = 30; // 最多显示前30步
+                String pathStr;
+                if (path.size() <= maxShow) {
+                    pathStr = path.stream()
+                            .map(p -> String.format("(%d,%d)", p.getX(), p.getY()))
+                            .collect(Collectors.joining(" → "));
+                } else {
+                    String head = path.subList(0, 15).stream()
+                            .map(p -> String.format("(%d,%d)", p.getX(), p.getY()))
+                            .collect(Collectors.joining(" → "));
+                    String tail = path.subList(path.size() - 3, path.size()).stream()
+                            .map(p -> String.format("(%d,%d)", p.getX(), p.getY()))
+                            .collect(Collectors.joining(" → "));
+                    pathStr = head + " → ...(" + (path.size() - 18) + "步)... → " + tail;
+                }
                 log.info("单位 {} ({}id={}) 路径 ({}步): 起点({},{}) → {}",
                         u.type.name(), u.getPlayerId() == myPlayerId ? "" : "敌",
                         u.getId(), path.size(),
@@ -191,21 +204,16 @@ public class MovementSimulator {
         recordSnapshot();
     }
 
-    /** 从预留表中重建单位路径 */
+    /** 从预留表中重建单位路径（跳过连续相同位置，仅记录实际移动） */
     private List<Position> reconstructPathFromReservations(int unitId) {
         List<Position> path = new ArrayList<>();
-        int maxSearch = coordinator != null ? coordinator.getMaxSteps() : world.getWidth() * world.getHeight();
-        for (int step = 1; step <= maxSearch; step++) {
-            boolean found = false;
-            for (int x = 0; x < world.getWidth() && !found; x++) {
-                for (int y = 0; y < world.getHeight() && !found; y++) {
-                    if (resTable.getReservation(step, x, y, world.getWidth()) == unitId) {
-                        path.add(Position.of(x, y));
-                        found = true;
-                    }
-                }
+        Position lastAdded = null;
+        for (var entry : resTable.getUnitReservations(unitId, world.getWidth())) {
+            Position cur = entry.getValue();
+            if (!cur.equals(lastAdded)) {
+                path.add(cur);
+                lastAdded = cur;
             }
-            if (!found) break;
         }
         return path;
     }

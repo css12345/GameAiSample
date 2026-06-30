@@ -15,7 +15,11 @@ public class MovementCoordinator {
     private GameWorldState world;
     private GridGraph graph;
     private ThreatMap threatMap;
-    /** 安全上限：防止无解时无限搜索。默认=地图总格数，等价于"无限制" */
+    /**
+     * 安全上限：防止无解时无限搜索。
+     * 默认 = 2×(宽+高)，覆盖绕障碍物场景。40×40 地图 = 160 步。
+     * 设为 0 或负数表示不限制（危险，仅调试用）。
+     */
     private int maxSteps;
     private SpaceTimeAStar lastAStar;
 
@@ -23,8 +27,8 @@ public class MovementCoordinator {
         this.world = world;
         this.graph = new GridGraph(world);
         this.threatMap = new ThreatMap(world);
-        // 理论上单条路径最多经过所有格子一次，设为此值作为安全上限
-        this.maxSteps = world.getWidth() * world.getHeight();
+        // 对角线 Manhattan 距离 × 2，覆盖绕障碍物场景
+        this.maxSteps = (world.getWidth() + world.getHeight()) * 2;
     }
 
     /**
@@ -135,6 +139,13 @@ public class MovementCoordinator {
         for (int i = 0; i < path.size(); i++) {
             Position p = path.get(i);
             resTable.reserve(i + 1, p.getX(), p.getY(), world.getWidth(), unitId);
+        }
+        // === 关键：锁定终点位置，防止后来者停在同一个格子上 ===
+        // A* 终止条件是 chebyshevDist<=1，不同单位可能在不同 step 到达同一终点格。
+        // 把终点从到达步数+1 到 maxSteps 全部预留，确保后来者必须选不同的相邻格。
+        Position finalPos = path.get(path.size() - 1);
+        for (int s = path.size() + 1; s <= maxSteps; s++) {
+            resTable.reserve(s, finalPos.getX(), finalPos.getY(), world.getWidth(), unitId);
         }
     }
 

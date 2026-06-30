@@ -89,7 +89,7 @@ public class MovementCoordinatorStressTest {
      * 地图: default (40×40)，5 个矿工，无敌人，目标 (25,28)
      *
      * <h3>结论</h3>
-     * maxSteps 默认为 width×height=1600，A* 在到达目标或搜索空间耗尽时自然终止。
+     * maxSteps 默认为 2×(宽+高)=160，A* 在到达目标、超过 maxSteps 或节点预算耗尽时终止。
      * 之前 maxSteps=10 人为限制了搜索深度导致绕行失败，现已修复。
      * 若人工设回 10，仅最近单位能成功 → 验证了旧行为的 bug 性质。
      */
@@ -115,7 +115,7 @@ public class MovementCoordinatorStressTest {
 
         Position target = Position.of(25, 28);
 
-        // ===== 默认 maxSteps=width×height=1600：全部应该成功 =====
+        // ===== 默认 maxSteps=2×(40+40)=160：全部应该成功 =====
         MovementCoordinator mc = new MovementCoordinator(world);
         Map<Integer, Position> steps = mc.planSquadMovement(
                 new ArrayList<>(miners), target, Collections.emptyList(), 0.5, config,
@@ -128,7 +128,7 @@ public class MovementCoordinatorStressTest {
                 })
                 .count();
 
-        log.info("=== 默认 maxSteps=1600 结果 ===");
+        log.info("=== 默认 maxSteps=2×(40+40)=160 结果 ===");
         for (GameUnit m : miners) {
             Position next = steps.get(m.getId());
             boolean ok = next != null && !next.equals(m.getPos());
@@ -140,7 +140,11 @@ public class MovementCoordinatorStressTest {
         log.info("  成功移动: {}/{}", moved, miners.size());
 
         // 全部 5 个都应找到路径
-        assertThat(moved).as("默认 maxSteps(1600) 下全部单位应找到路径").isEqualTo(5);
+        assertThat(moved).as("默认 maxSteps=2×(40+40)=160 下全部单位应找到路径").isEqualTo(5);
+
+        // 验证终点不重叠：每个单位停在不同的格子上
+        Set<Position> finalPositions = new HashSet<>(steps.values());
+        assertThat(finalPositions.size()).as("全部单位第一步应不重叠").isEqualTo(miners.size());
 
         // ===== 人工设 maxSteps=10：复现旧行为的 bug =====
         MovementCoordinator mc10 = new MovementCoordinator(world);
@@ -156,7 +160,7 @@ public class MovementCoordinatorStressTest {
                 })
                 .count();
 
-        log.info("=== (对比) maxSteps=10 结果 ===");
+        log.info("=== (对比) 人为限制 maxSteps=10 结果 ===");
         for (GameUnit m : miners) {
             Position next = steps10.get(m.getId());
             boolean ok = next != null && !next.equals(m.getPos());
@@ -214,6 +218,81 @@ public class MovementCoordinatorStressTest {
         startPlayer2.setObjectIdRange(objectIdRange2);
         start.setPlayers(List.of(startPlayer1, startPlayer2));
         return start;
+    }
+
+    /**
+     * 验证多个单位到达目标附近时不会停在同一个格子上。
+     *
+     * <p>修复前：A* 终止条件 chebyshevDist≤1 允许不同单位在不同 step
+     * 停在相同终点格，导致移动完成后单位重叠。
+     *
+     * <p>修复后：单位到达后，终点格从到达步数+1 到 maxSteps 全部预留，
+     * 迫使后来者选择不同的相邻格。
+     */
+    @Test
+    void multipleUnitsNearTarget_shouldNotOverlap() {
+        // 开放地图 6×3，目标在 (3,1)，3 个单位从右侧不同位置出发
+        Start start = buildStart("0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0", 6, 3);
+        GameWorldState world = GameWorldState.fromMapString(start, 1111);
+
+        List<GameUnit> units = List.of(
+                new GameUnit(101, 1111, UnitType.FIGHTER, Position.of(5, 1), 100),
+                new GameUnit(102, 1111, UnitType.FIGHTER, Position.of(5, 0), 100),
+                new GameUnit(103, 1111, UnitType.FIGHTER, Position.of(5, 2), 100)
+        );
+        units.forEach(u -> world.getUnits().put(u.getId(), u));
+        world.refreshOccupied();
+
+        Position target = Position.of(3, 1);
+        MovementCoordinator mc = new MovementCoordinator(world);
+        mc.setMaxSteps(20); // 足够大
+        ReservationTable rt = new ReservationTable();
+
+        Map<Integer, Position> firstSteps = mc.planSquadMovement(
+                new ArrayList<>(units), target, Collections.emptyList(), 0.0,
+                AIConfig.aggressiveRush(), rt, new HashSet<>());
+
+        // 从预留表中找到每个单位的最终位置（最高的 step 对应的位置）
+        Map<Integer, Position> finalPositions = new HashMap<>();
+        for (GameUnit u : units) {
+            Position lastPos = u.getPos(); // 兜底
+            for (int s = 20; s >= 1; s--) {
+                for (int x = 0; x < 6; x++) {
+                    for (int y = 0; y < 3; y++) {
+                        if (rt.getReservation(s, x, y, 6) == u.getId()) {
+                            lastPos = Position.of(x, y);
+                            // 找到了最高 step，跳出
+                            s = 0;
+                            x = 6;
+                            y = 3;
+                        }
+                    }
+                }
+            }
+            finalPositions.put(u.getId(), lastPos);
+        }
+
+        log.info("单位终点位置:");
+        for (GameUnit u : units) {
+            Position end = finalPositions.get(u.getId());
+            log.info("  单位 {}: 起点({},{}) → 终点({},{}), 距离目标={}",
+                    u.getId(), u.getPos().getX(), u.getPos().getY(),
+                    end.getX(), end.getY(), end.chebyshev(target));
+        }
+
+        // 核心断言：每个单位的终点应不同
+        Set<Position> uniqueEndpoints = new HashSet<>(finalPositions.values());
+        assertThat(uniqueEndpoints.size()).as("每个单位终点位置应唯一")
+                .isEqualTo(units.size());
+
+        // 所有终点应在目标距离 ≤1 内
+        for (Position end : finalPositions.values()) {
+            assertThat(end.chebyshev(target)).as("终点应在目标距离1内").isLessThanOrEqualTo(1);
+        }
+
+        // 第一步也不应重叠
+        Set<Position> uniqueFirstSteps = new HashSet<>(firstSteps.values());
+        assertThat(uniqueFirstSteps.size()).as("第一个步位置应唯一").isEqualTo(units.size());
     }
 
 }
