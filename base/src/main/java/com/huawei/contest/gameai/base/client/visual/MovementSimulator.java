@@ -194,7 +194,8 @@ public class MovementSimulator {
     /** 从预留表中重建单位路径 */
     private List<Position> reconstructPathFromReservations(int unitId) {
         List<Position> path = new ArrayList<>();
-        for (int step = 1; step <= 10; step++) {
+        int maxSearch = coordinator != null ? coordinator.getMaxSteps() : world.getWidth() * world.getHeight();
+        for (int step = 1; step <= maxSearch; step++) {
             boolean found = false;
             for (int x = 0; x < world.getWidth() && !found; x++) {
                 for (int y = 0; y < world.getHeight() && !found; y++) {

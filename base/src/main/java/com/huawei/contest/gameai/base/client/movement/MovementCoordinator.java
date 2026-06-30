@@ -15,13 +15,16 @@ public class MovementCoordinator {
     private GameWorldState world;
     private GridGraph graph;
     private ThreatMap threatMap;
-    private int maxSteps = 10;
+    /** 安全上限：防止无解时无限搜索。默认=地图总格数，等价于"无限制" */
+    private int maxSteps;
     private SpaceTimeAStar lastAStar;
 
     public MovementCoordinator(GameWorldState world) {
         this.world = world;
         this.graph = new GridGraph(world);
         this.threatMap = new ThreatMap(world);
+        // 理论上单条路径最多经过所有格子一次，设为此值作为安全上限
+        this.maxSteps = world.getWidth() * world.getHeight();
     }
 
     /**
@@ -144,6 +147,9 @@ public class MovementCoordinator {
         }
         return new Position(ax / units.size(), ay / units.size());
     }
+
+    public void setMaxSteps(int maxSteps) { this.maxSteps = maxSteps; }
+    public int getMaxSteps() { return maxSteps; }
 
     public void cleanup() {
         graph.setVacatedPositions(Collections.emptySet());
