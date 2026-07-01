@@ -60,4 +60,9 @@ public class GridGraph implements IndexedGraph<GridNode> {
         }
         return conns;
     }
+
+    /** 轻量级可走检查（不创建 Connection/GridNode 对象，A* 内联展开用） */
+    public boolean isWalkableAt(int x, int y) {
+        return world.isWalkableForPlanning(x, y, vacatedPositions);
+    }
 }

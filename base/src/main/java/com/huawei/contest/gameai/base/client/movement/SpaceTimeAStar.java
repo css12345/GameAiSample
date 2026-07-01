@@ -19,10 +19,11 @@ public class SpaceTimeAStar {
     private double dangerWeight = 3.0;
     @Setter
     private double maxDangerThreshold = 1.5;
-    private final Set<String> visitedNodes = new HashSet<>();
-    /** 节点展开上限：超过则回退到最接近目标的已探索节点。25K 平衡速度与路径质量 */
+    /** A* 搜索访问过的位置（可视化用） */
+    private final Set<Long> visitedNodes = new HashSet<>();
+    /** 节点展开上限：超过则回退到最接近目标的已探索节点 */
     @Setter
-    private int maxExpansions = 25_000;
+    private int maxExpansions = 4_000;
 
     public SpaceTimeAStar(GridGraph graph, ReservationTable resTable, int maxSteps,
                    GameWorldState world, ThreatMap threatMap) {
@@ -32,122 +33,134 @@ public class SpaceTimeAStar {
         this.threatMap = threatMap;
     }
 
+    /** 紧凑 long 键：step(20bit) | y(10bit) | x(10bit)，替代 String 拼接 */
+    private static long stateKey(int x, int y, int step) {
+        return ((long) step << 20) | (y << 10) | x;
+    }
+
     public List<Position> search(IUnit unit, Position target) {
         visitedNodes.clear();
-        GridNode startNode = new GridNode(unit.getPos().getX(), unit.getPos().getY());
-        GridNode targetNode = new GridNode(target.getX(), target.getY());
+        int startX = unit.getPos().getX(), startY = unit.getPos().getY();
+        int targetX = target.getX(), targetY = target.getY();
+        int width = graph.getWidth();
 
-        PriorityQueue<SpaceTimeNode> open = new PriorityQueue<>();
-        Map<String, SpaceTimeNode> visited = new HashMap<>();
+        PriorityQueue<SpaceTimeNode> open = new PriorityQueue<>(4096);
+        Map<Long, SpaceTimeNode> visited = new HashMap<>(4096);
 
-        SpaceTimeNode start = new SpaceTimeNode(startNode, 0,
-                heuristic(startNode, targetNode) + getDangerCost(startNode), null, 0);
+        int startH = chebyshev(startX, startY, targetX, targetY);
+        SpaceTimeNode start = new SpaceTimeNode(startX, startY, 0,
+                startH * 10 + getDangerCost(startX, startY), null, 0);
         open.add(start);
-        String startKey = stateKey(startNode.getX(), startNode.getY(), 0);
+        long startKey = stateKey(startX, startY, 0);
         visited.put(startKey, start);
         visitedNodes.add(startKey);
 
-        // 追踪最接近目标的节点（用于失败时的 best-effort 回退）
         SpaceTimeNode bestNode = null;
         int bestDist = Integer.MAX_VALUE;
+        int startDist = startH;
 
         int expansions = 0;
         while (!open.isEmpty()) {
             SpaceTimeNode current = open.poll();
-            int curDist = chebyshevDist(current.node, targetNode);
+            int cx = current.x, cy = current.y;
+            int curDist = chebyshev(cx, cy, targetX, targetY);
             if (curDist < bestDist && current.step > 0) {
                 bestDist = curDist;
                 bestNode = current;
             }
-            // 终止条件：至少移动一步，且距离目标切比雪夫距离<=1
             if (current.step > 0 && curDist <= 1) {
                 return reconstructPath(current);
             }
             if (current.step >= maxSteps) continue;
-            // 节点展开预算耗尽 → 回退到最佳节点，至少靠近目标
             if (++expansions > maxExpansions) {
-                if (bestNode != null && bestDist < chebyshevDist(startNode, targetNode)) {
+                if (bestNode != null && bestDist < startDist) {
                     return reconstructPath(bestNode);
                 }
                 return null;
             }
 
-            // 扩展：原地等待 + 八个邻居（由Graph提供）
-            List<GridNode> neighbors = new ArrayList<>();
-            neighbors.add(current.node); // 等待
-            for (Connection<GridNode> conn : graph.getConnections(current.node)) {
-                neighbors.add(conn.getToNode());
-            }
-
-            for (GridNode next : neighbors) {
-                int nextStep = current.step + 1;
-                // 1. 预留检查（硬约束：不能撞已预留格）
-                if (resTable.getReservation(nextStep, next.getX(), next.getY(), graph.getWidth()) != -1) {
-                    continue;
+            // 展开邻居（内联避免对象创建）
+            // 1. 原地等待
+            expandNeighbor(open, visited, current, cx, cy, width, targetX, targetY);
+            // 2. 八方向
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dx = -1; dx <= 1; dx++) {
+                    if (dx == 0 && dy == 0) continue;
+                    int nx = cx + dx, ny = cy + dy;
+                    if (!graph.isWalkableAt(nx, ny)) continue;
+                    // 对角线防穿墙角
+                    if (dx != 0 && dy != 0) {
+                        if (!graph.isWalkableAt(cx + dx, cy) || !graph.isWalkableAt(cx, cy + dy)) {
+                            continue;
+                        }
+                    }
+                    expandNeighbor(open, visited, current, nx, ny, width, targetX, targetY);
                 }
-                // 2. 威胁：作为软成本处理（getDangerCost 已加高额成本），
-                //    不硬阻断，避免单位被威胁区完全包围时动弹不得。
-                //    A* 会优先选低威胁路径，无安全路时才穿越威胁。
-                String key = stateKey(next.getX(), next.getY(), nextStep);
-                if (visited.containsKey(key)) {
-                    continue;
-                }
-
-                int stepCost = 10 + getDangerCost(next);
-                int newG = current.gCost + stepCost;
-                int newH = heuristic(next, targetNode);
-                SpaceTimeNode neighborNode = new SpaceTimeNode(next, nextStep, newG + newH, current, newG);
-                open.add(neighborNode);
-                visited.put(key, neighborNode);
-                visitedNodes.add(key);
             }
         }
 
-        // 搜索空间耗尽：回退到最佳节点
-        if (bestNode != null && bestDist < chebyshevDist(startNode, targetNode)) {
+        if (bestNode != null && bestDist < startDist) {
             return reconstructPath(bestNode);
         }
         return null;
     }
 
-    private int getDangerCost(GridNode node) {
-        if (threatMap == null) {
-            return 0;
+    private void expandNeighbor(PriorityQueue<SpaceTimeNode> open, Map<Long, SpaceTimeNode> visited,
+                                SpaceTimeNode current, int nx, int ny, int width,
+                                int targetX, int targetY) {
+        int nextStep = current.step + 1;
+        if (resTable.getReservation(nextStep, nx, ny, width) != -1) {
+            return;
         }
-        return (int)(threatMap.getDanger(node.getX(), node.getY()) * dangerWeight * 10);
+        long key = stateKey(nx, ny, nextStep);
+        if (visited.containsKey(key)) {
+            return;
+        }
+        int stepCost = 10 + getDangerCost(nx, ny);
+        int newG = current.gCost + stepCost;
+        int newH = chebyshev(nx, ny, targetX, targetY) * 10;
+        SpaceTimeNode neighborNode = new SpaceTimeNode(nx, ny, nextStep, newG + newH, current, newG);
+        open.add(neighborNode);
+        visited.put(key, neighborNode);
+        visitedNodes.add(key);
     }
 
-    private int chebyshevDist(GridNode a, GridNode b) {
-        return Math.max(Math.abs(a.getX() - b.getX()), Math.abs(a.getY() - b.getY()));
+    private int getDangerCost(int x, int y) {
+        if (threatMap == null) return 0;
+        return (int)(threatMap.getDanger(x, y) * dangerWeight * 10);
     }
 
-    private int heuristic(GridNode a, GridNode b) { return chebyshevDist(a, b) * 10; }
+    private static int chebyshev(int ax, int ay, int bx, int by) {
+        return Math.max(Math.abs(ax - bx), Math.abs(ay - by));
+    }
 
     private List<Position> reconstructPath(SpaceTimeNode node) {
         LinkedList<Position> path = new LinkedList<>();
         while (node != null) {
-            path.addFirst(new Position(node.node.getX(), node.node.getY()));
+            path.addFirst(Position.of(node.x, node.y));
             node = node.parent;
         }
-        if (!path.isEmpty()) path.removeFirst(); // 移除起点
+        if (!path.isEmpty()) path.removeFirst();
         return path;
     }
 
-    /** 返回 A* 搜索过程中访问过的所有 (x, y, step) 位置，用于可视化调试 */
+    /** 返回 A* 搜索过程中访问过的所有 (x, y) 位置，用于可视化调试 */
     public Set<Position> getVisitedPositions() {
-        return visitedNodes.stream()
-                .map(key -> {
-                    String[] parts = key.split(",");
-                    return Position.of(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]));
-                })
-                .collect(Collectors.toSet());
+        Set<Position> result = new HashSet<>(visitedNodes.size());
+        for (Long key : visitedNodes) {
+            int x = (int)(key & 0x3FF);
+            int y = (int)((key >>> 10) & 0x3FF);
+            result.add(Position.of(x, y));
+        }
+        return result;
     }
 
-    private String stateKey(int x, int y, int step) { return x + "," + y + "," + step; }
-
     static class SpaceTimeNode implements Comparable<SpaceTimeNode> {
-        GridNode node; int step; int fCost; int gCost; SpaceTimeNode parent;
-        SpaceTimeNode(GridNode n, int step, int f, SpaceTimeNode p, int g) { node=n; this.step=step; fCost=f; parent=p; gCost=g; }
+        final int x, y, step, fCost, gCost;
+        final SpaceTimeNode parent;
+        SpaceTimeNode(int x, int y, int step, int f, SpaceTimeNode p, int g) {
+            this.x = x; this.y = y; this.step = step; this.fCost = f; this.parent = p; this.gCost = g;
+        }
         @Override public int compareTo(SpaceTimeNode o) { return Integer.compare(fCost, o.fCost); }
     }
 }
