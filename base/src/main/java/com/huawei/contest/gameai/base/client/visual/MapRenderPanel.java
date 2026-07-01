@@ -39,6 +39,8 @@ public class MapRenderPanel extends JPanel {
     // 交互状态
     private UnitType selectedUnitType = UnitType.FIGHTER;
     private boolean placingEnemy = false;
+    /** true=放置单位模式, false=选择单位模式 */
+    private boolean placeMode = true;
 
     // 当前悬停的格子坐标（用于状态栏显示）
     private Position hoveredCell;
@@ -142,7 +144,16 @@ public class MapRenderPanel extends JPanel {
         int[] grid = screenToGrid(e.getX(), e.getY());
         if (grid == null) return;
         int gx = grid[0], gy = grid[1];
-        // 不能放在障碍物（树木、高山、金矿、宝石矿、守护者）上
+
+        if (!placeMode) {
+            // 选择模式：点击单位选中
+            sim.selectUnitAt(gx, gy);
+            notifySelectionChange();
+            repaint();
+            return;
+        }
+
+        // 放置模式：不能放在障碍物（树木、高山、金矿、宝石矿、守护者）上
         if (sim.isObstacle(gx, gy)) return;
 
         if (placingEnemy) {
@@ -157,7 +168,13 @@ public class MapRenderPanel extends JPanel {
         if (sim == null) return;
         int[] grid = screenToGrid(e.getX(), e.getY());
         if (grid == null) return;
-        sim.setTarget(grid[0], grid[1]);
+        int sid = sim.getSelectedSquadId();
+        if (sid > 0) {
+            sim.setSquadTarget(sid, grid[0], grid[1]);
+        } else {
+            sim.setTarget(grid[0], grid[1]);
+        }
+        notifySelectionChange(); // 刷新目标模式提示
         repaint();
     }
 
@@ -175,6 +192,8 @@ public class MapRenderPanel extends JPanel {
     public void setShowCoords(boolean v) { showCoords = v; repaint(); }
     public void setSelectedUnitType(UnitType type) { this.selectedUnitType = type; }
     public void setPlacingEnemy(boolean v) { this.placingEnemy = v; }
+    public void setPlaceMode(boolean v) { this.placeMode = v; }
+    public boolean isPlaceMode() { return placeMode; }
 
     // ==================== 坐标转换 ====================
 
@@ -417,7 +436,15 @@ public class MapRenderPanel extends JPanel {
             List<Position> path = sim.getUnitPath(u.getId());
             if (path.isEmpty()) continue;
 
-            Color pathColor = PATH_COLORS[colorIdx % PATH_COLORS.length];
+            // 编队颜色优先
+            Color pathColor;
+            int sid = sim.getUnitSquad(u.getId());
+            if (sid > 0) {
+                var si = sim.getSquad(sid);
+                pathColor = si != null ? si.color() : PATH_COLORS[colorIdx % PATH_COLORS.length];
+            } else {
+                pathColor = PATH_COLORS[colorIdx % PATH_COLORS.length];
+            }
             colorIdx++;
 
             Position start = u.getPos();
@@ -504,12 +531,27 @@ public class MapRenderPanel extends JPanel {
             fillColor = isMine ? COLOR_MY_UNIT : COLOR_ENEMY_UNIT;
         }
 
+        // 编队颜色边框
+        int sid = sim.getUnitSquad(u.getId());
+        Color squadColor = null;
+        if (sid > 0) {
+            var si = sim.getSquad(sid);
+            if (si != null) squadColor = si.color();
+        }
+
         g2.setColor(fillColor);
         g2.fillOval(sx + margin, sy + margin, size, size);
 
-        g2.setColor(Color.BLACK);
-        g2.setStroke(new BasicStroke(1f));
+        // 编队边框（加粗）
+        if (squadColor != null) {
+            g2.setColor(squadColor);
+            g2.setStroke(new BasicStroke(2.5f));
+        } else {
+            g2.setColor(Color.BLACK);
+            g2.setStroke(new BasicStroke(1f));
+        }
         g2.drawOval(sx + margin, sy + margin, size, size);
+        g2.setStroke(new BasicStroke(1f));
 
         if (cellSize >= 16) {
             String label = getUnitLabel(u.type);
@@ -520,6 +562,31 @@ public class MapRenderPanel extends JPanel {
             int tx = sx + (cellSize - fm.stringWidth(label)) / 2;
             int ty = sy + (cellSize + fm.getAscent()) / 2 - 1;
             g2.drawString(label, tx, ty);
+        }
+
+        // 编队编号（右上角醒目标记）
+        if (sid > 0 && cellSize >= 14) {
+            // 编队色填充小圆 + 白字编号
+            int badge = Math.max(10, cellSize / 2);
+            int bx = sx + cellSize - badge - 1;
+            int by = sy + 1;
+            g2.setColor(squadColor);
+            g2.fillOval(bx, by, badge, badge);
+            g2.setColor(Color.WHITE);
+            g2.setFont(new Font("SansSerif", Font.BOLD, Math.max(8, badge * 2 / 3)));
+            FontMetrics fm2 = g2.getFontMetrics();
+            String num = String.valueOf(sid);
+            g2.drawString(num, bx + (badge - fm2.stringWidth(num)) / 2,
+                    by + (badge + fm2.getAscent()) / 2 - 1);
+        }
+
+        // 选中单位：白色闪烁环
+        if (sim.getSelectedUnitId() == u.getId()) {
+            g2.setColor(Color.WHITE);
+            g2.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND,
+                    BasicStroke.JOIN_ROUND, 0, new float[]{3, 3}, 0));
+            g2.drawOval(sx + margin - 2, sy + margin - 2, size + 4, size + 4);
+            g2.setStroke(new BasicStroke(1f));
         }
     }
 
@@ -533,13 +600,20 @@ public class MapRenderPanel extends JPanel {
         };
     }
 
+    /** 绘制目标标记（全局 + 各编队） */
     private void drawTarget(Graphics2D g2) {
         Position t = sim.getTarget();
-        int cx = gridToScreenX(t.getX()) + cellSize / 2;
-        int cy = gridToScreenY(t.getY()) + cellSize / 2;
-        int r = cellSize / 2;
+        if (t != null) drawCrosshair(g2, t, COLOR_TARGET);
+        for (var s : sim.getSquads()) {
+            if (s.target() != null) drawCrosshair(g2, s.target(), s.color());
+        }
+    }
 
-        g2.setColor(COLOR_TARGET);
+    private void drawCrosshair(Graphics2D g2, Position pos, Color color) {
+        int cx = gridToScreenX(pos.getX()) + cellSize / 2;
+        int cy = gridToScreenY(pos.getY()) + cellSize / 2;
+        int r = cellSize / 2;
+        g2.setColor(color);
         g2.setStroke(new BasicStroke(2f));
         g2.drawLine(cx - r, cy, cx + r, cy);
         g2.drawLine(cx, cy - r, cx, cy + r);
@@ -601,4 +675,12 @@ public class MapRenderPanel extends JPanel {
 
     public Position getHoveredCell() { return hoveredCell; }
     public MovementSimulator getSim() { return sim; }
+
+    /** 单位选择变化回调 */
+    private Runnable onSelectionChange;
+    public void setOnSelectionChange(Runnable r) { this.onSelectionChange = r; }
+
+    private void notifySelectionChange() {
+        if (onSelectionChange != null) onSelectionChange.run();
+    }
 }

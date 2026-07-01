@@ -28,6 +28,11 @@ public class MovementVisualizer extends JFrame {
 
         controlPanel = new ControlPanel(sim, renderPanel);
         controlPanel.setOnPlanNeeded(this::planAndRefresh);
+        renderPanel.setOnSelectionChange(() -> {
+            controlPanel.updateSelectedUnitLabel();
+            controlPanel.refreshSquadList();
+            controlPanel.refreshSquadInfo();
+        });
 
         // 状态栏：坐标信息 + 状态
         coordLabel = new JLabel("x=— y=—");
@@ -42,14 +47,27 @@ public class MovementVisualizer extends JFrame {
         // 悬停坐标回调
         renderPanel.setOnHoverCallback((x, y) -> {
             coordLabel.setText("x=" + x + " y=" + y);
-            Position target = sim.getTarget();
             StringBuilder sb = new StringBuilder();
             sb.append("x=").append(x).append(" y=").append(y);
             sb.append("  地形=").append(describeTerrain(sim.getTerrainChar(x, y)));
             double danger = sim.getDanger(x, y);
             if (danger > 0) sb.append("  威胁=").append(String.format("%.1f", danger));
-            if (target != null && target.getX() == x && target.getY() == y) {
-                sb.append("  【目标点】");
+            Position globalTarget = sim.getTarget();
+            if (globalTarget != null && globalTarget.getX() == x && globalTarget.getY() == y) {
+                sb.append("  【全局目标】");
+            }
+            for (var s : sim.getSquads()) {
+                if (s.target() != null && s.target().getX() == x && s.target().getY() == y) {
+                    sb.append("  【编队").append(s.id()).append("目标】");
+                }
+            }
+            // 显示编队信息
+            for (var u : sim.getMyUnits()) {
+                if (u.getPos().getX() == x && u.getPos().getY() == y) {
+                    int sid = sim.getUnitSquad(u.getId());
+                    if (sid > 0) sb.append("  [编队").append(sid).append("]");
+                    break;
+                }
             }
             coordLabel.setText(sb.toString());
         });
@@ -62,16 +80,20 @@ public class MovementVisualizer extends JFrame {
         scrollPane.getHorizontalScrollBar().setUnitIncrement(24);
         add(scrollPane, BorderLayout.CENTER);
 
-        // 右侧: 控制面板 + 图例（包裹在滚动面板中防止截断）
+        // 右侧: 控制面板 + 图例（包裹在滚动面板中，内容多时可滚动）
         JPanel rightPanel = new JPanel();
         rightPanel.setLayout(new BoxLayout(rightPanel, BoxLayout.Y_AXIS));
         rightPanel.add(controlPanel);
         rightPanel.add(createLegendPanel());
 
         JScrollPane rightScroll = new JScrollPane(rightPanel);
-        rightScroll.setPreferredSize(new Dimension(275, 800));
+        rightScroll.setPreferredSize(new Dimension(290, 600));
+        rightScroll.setMinimumSize(new Dimension(290, 400));
+        rightScroll.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         rightScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         rightScroll.getVerticalScrollBar().setUnitIncrement(16);
+        // 让内部面板随滚动条宽度自适应，避免内容被裁剪
+        rightPanel.setAutoscrolls(true);
         add(rightScroll, BorderLayout.EAST);
 
         add(statusBar, BorderLayout.SOUTH);
@@ -86,7 +108,7 @@ public class MovementVisualizer extends JFrame {
         JPanel panel = new JPanel();
         panel.setBorder(BorderFactory.createTitledBorder("图例"));
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-        panel.setMaximumSize(new Dimension(260, 9999));
+        panel.setAlignmentX(LEFT_ALIGNMENT);
 
         // 地形
         panel.add(legendTitle("══ 地形 ══"));
@@ -132,6 +154,8 @@ public class MovementVisualizer extends JFrame {
         l.setFont(new Font("SansSerif", Font.BOLD, 11));
         l.setBorder(new EmptyBorder(6, 4, 2, 4));
         l.setForeground(new Color(0x55, 0x55, 0x55));
+        l.setAlignmentX(LEFT_ALIGNMENT);
+        l.setMaximumSize(new Dimension(Integer.MAX_VALUE, l.getPreferredSize().height));
         return l;
     }
 
@@ -140,6 +164,8 @@ public class MovementVisualizer extends JFrame {
         l.setFont(new Font("SansSerif", Font.PLAIN, 11));
         l.setBorder(new EmptyBorder(1, 4, 1, 4));
         l.setIcon(new ColorIcon(color, 14, 14));
+        l.setAlignmentX(LEFT_ALIGNMENT);
+        l.setMaximumSize(new Dimension(Integer.MAX_VALUE, l.getPreferredSize().height));
         return l;
     }
 
@@ -148,6 +174,8 @@ public class MovementVisualizer extends JFrame {
         l.setFont(new Font("SansSerif", Font.PLAIN, 10));
         l.setForeground(new Color(0x77, 0x77, 0x77));
         l.setBorder(new EmptyBorder(0, 20, 0, 4));
+        l.setAlignmentX(LEFT_ALIGNMENT);
+        l.setMaximumSize(new Dimension(Integer.MAX_VALUE, l.getPreferredSize().height));
         return l;
     }
 
@@ -246,11 +274,14 @@ public class MovementVisualizer extends JFrame {
                 return;
             }
             if (sim.getMyUnits().isEmpty()) {
-                statusLabel.setText("请先在地图上放置己方单位（左键点击）");
+                statusLabel.setText("请先在地图上放置己方单位（放置模式左键点击）");
                 return;
             }
-            if (sim.getTarget() == null) {
-                statusLabel.setText("请先设置移动目标（右键点击）");
+            // 有全局目标 或 任意编队有目标 才能规划
+            boolean hasGlobalTarget = sim.getTarget() != null;
+            boolean hasSquadTarget = sim.getSquads().stream().anyMatch(s -> s.target() != null);
+            if (!hasGlobalTarget && !hasSquadTarget) {
+                statusLabel.setText("请先设置目标：选中编队(或全局)→右键地图");
                 return;
             }
             statusLabel.setText("正在计算路径...");
@@ -258,6 +289,8 @@ public class MovementVisualizer extends JFrame {
             sim.planMovement();
             renderPanel.repaint();
             controlPanel.updateStepLabel();
+            controlPanel.refreshSquadList();
+            controlPanel.refreshSquadInfo();
             statusLabel.setText("路径计算完成 — " + sim.getMyUnits().size()
                     + " 个单位, 最长 " + sim.getMaxPathLen() + " 步");
         } catch (Exception ex) {

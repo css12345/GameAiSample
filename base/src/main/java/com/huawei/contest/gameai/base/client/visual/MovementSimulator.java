@@ -29,14 +29,77 @@ public class MovementSimulator {
 
     private final Map<Integer, GameUnit> myUnits = new LinkedHashMap<>();
     private final Map<Integer, GameUnit> enemyUnits = new LinkedHashMap<>();
-    private Position target;
+    private Position target; // 全局目标（未编队时使用）
 
-    // 移动规划结果
+    // ==================== 编队管理 ====================
+    public record SquadInfo(int id, String name, Position target, java.awt.Color color) {}
+    private final Map<Integer, SquadInfo> squads = new LinkedHashMap<>();
+    private final Map<Integer, Integer> unitToSquad = new HashMap<>(); // unitId → squadId
+    private int selectedSquadId = 0; // 0=未编队
+    private int nextSquadId = 1;
+    private static final java.awt.Color[] SQUAD_COLORS = {
+            new java.awt.Color(0xE6, 0x19, 0x4B), // 红
+            new java.awt.Color(0x3C, 0xB4, 0x4B), // 绿
+            new java.awt.Color(0x42, 0x8B, 0xFF), // 蓝
+            new java.awt.Color(0xF5, 0x82, 0x31), // 橙
+            new java.awt.Color(0x91, 0x1E, 0xB4), // 紫
+            new java.awt.Color(0x00, 0xCD, 0xCD), // 青
+    };
+
+    public SquadInfo createSquad(String name) {
+        int id = nextSquadId++;
+        SquadInfo s = new SquadInfo(id, name, null,
+                SQUAD_COLORS[(id - 1) % SQUAD_COLORS.length]);
+        squads.put(id, s);
+        return s;
+    }
+    public void removeSquad(int squadId) {
+        squads.remove(squadId);
+        unitToSquad.values().removeIf(v -> v == squadId);
+    }
+    public void assignToSquad(int unitId, int squadId) {
+        if (squads.containsKey(squadId)) unitToSquad.put(unitId, squadId);
+        else unitToSquad.remove(unitId);
+    }
+    public void setSquadTarget(int squadId, int x, int y) {
+        SquadInfo s = squads.get(squadId);
+        if (s != null) squads.put(squadId, new SquadInfo(s.id, s.name, Position.of(x, y), s.color));
+    }
+    public SquadInfo getSquad(int squadId) { return squads.get(squadId); }
+    public Collection<SquadInfo> getSquads() { return squads.values(); }
+    public int getUnitSquad(int unitId) { return unitToSquad.getOrDefault(unitId, 0); }
+    public int getSelectedSquadId() { return selectedSquadId; }
+    public void setSelectedSquadId(int id) { this.selectedSquadId = id; }
+
+    // ==================== 单位选择 ====================
+    private int selectedUnitId = -1;
+    public int getSelectedUnitId() { return selectedUnitId; }
+    public void setSelectedUnitId(int id) { this.selectedUnitId = id; }
+    public GameUnit getSelectedUnit() { return selectedUnitId >= 0 ? myUnits.get(selectedUnitId) : null; }
+    /** 选中指定格子的己方单位，返回是否选中成功 */
+    public boolean selectUnitAt(int x, int y) {
+        for (GameUnit u : myUnits.values()) {
+            if (u.getPos().getX() == x && u.getPos().getY() == y) {
+                selectedUnitId = u.getId();
+                return true;
+            }
+        }
+        selectedUnitId = -1;
+        return false;
+    }
+    /** 获取编队成员列表 */
+    public List<GameUnit> getSquadMembers(int squadId) {
+        return myUnits.values().stream()
+                .filter(u -> getUnitSquad(u.getId()) == squadId)
+                .collect(Collectors.toList());
+    }
+
+    // ==================== 移动规划结果 ====================
     private MovementCoordinator coordinator;
     private ReservationTable resTable;
     private Set<Position> vacated;
-    private Map<Integer, List<Position>> fullPaths;   // unitId -> 完整路径（不含起点）
-    private Map<Integer, Position> firstSteps;         // unitId -> 下一步位置
+    private Map<Integer, List<Position>> fullPaths;
+    private Map<Integer, Position> firstSteps;
     private int currentStep = 0;
     private int maxPathLen = 0;
 
@@ -140,97 +203,115 @@ public class MovementSimulator {
 
     // ==================== 规划移动 ====================
 
+    /** 按编队规划所有单位移动。有编队时按编队分目标，否则全部去全局目标。 */
     public void planMovement() {
-        if (world == null || myUnits.isEmpty() || target == null) return;
+        if (world == null || myUnits.isEmpty()) return;
 
         resTable.clear();
         vacated.clear();
-        fullPaths = null;
-        firstSteps = null;
+        fullPaths = new LinkedHashMap<>();
+        firstSteps = new LinkedHashMap<>();
         currentStep = 0;
         maxPathLen = 0;
         stepSnapshots.clear();
 
         syncUnitsToWorld();
         coordinator = new MovementCoordinator(world);
-
-        List<IUnit> squadUnits = new ArrayList<>(myUnits.values());
         List<IUnit> enemies = new ArrayList<>(enemyUnits.values());
 
-        // ===== 日志：规划开始 =====
         log.info("========== 移动规划开始 ==========");
-        log.info("地图: {}x{}", world.getWidth(), world.getHeight());
-        log.info("目标位置: ({}, {})", target.getX(), target.getY());
-        log.info("攻击性: {}, 危险权重: {}, 最大危险阈值: {}, maxSteps: {}",
-                String.format("%.2f", aggressiveness), config.getPathDangerWeight(),
-                config.getPathMaxDangerThreshold(), coordinator.getMaxSteps());
+        log.info("地图: {}x{}, 攻击性: {}, maxSteps: {}",
+                world.getWidth(), world.getHeight(),
+                String.format("%.2f", aggressiveness), coordinator.getMaxSteps());
 
-        String unitList = squadUnits.stream()
-                .map(u -> String.format("%s(id=%d, pos=(%d,%d))",
-                        ((GameUnit)u).type.name(), u.getId(), u.getPos().getX(), u.getPos().getY()))
-                .collect(Collectors.joining(", "));
-        log.info("己方单位 ({}个): [{}]", squadUnits.size(), unitList);
+        // 收集有目标的编队
+        List<SquadInfo> activeSquads = squads.values().stream()
+                .filter(s -> s.target != null)
+                .collect(Collectors.toList());
 
-        String enemyList = enemies.stream()
-                .map(u -> String.format("%s(id=%d, pos=(%d,%d))",
-                        ((GameUnit)u).type.name(), u.getId(), u.getPos().getX(), u.getPos().getY()))
-                .collect(Collectors.joining(", "));
-        log.info("敌方单位 ({}个): [{}]", enemies.size(), enemyList);
+        if (!activeSquads.isEmpty()) {
+            // ===== 编队模式：每个编队独立规划，共享预留表 =====
+            for (SquadInfo squad : activeSquads) {
+                List<GameUnit> squadUnits = myUnits.values().stream()
+                        .filter(u -> getUnitSquad(u.getId()) == squad.id)
+                        .collect(Collectors.toList());
+                if (squadUnits.isEmpty()) continue;
 
-        firstSteps = coordinator.planSquadMovement(
-                squadUnits, target, enemies, aggressiveness, config, resTable, vacated);
+                log.info("--- 编队[{}] \"{}\" → ({},{}) {} 个单位 ---",
+                        squad.id, squad.name, squad.target.getX(), squad.target.getY(), squadUnits.size());
+                planOneSquad(squadUnits, squad.target, enemies);
+            }
 
-        // 从预留表重建完整路径
-        fullPaths = new LinkedHashMap<>();
-        for (GameUnit u : myUnits.values()) {
+            // 未编队的单位去全局目标
+            List<GameUnit> unassigned = myUnits.values().stream()
+                    .filter(u -> getUnitSquad(u.getId()) == 0)
+                    .collect(Collectors.toList());
+            if (!unassigned.isEmpty() && target != null) {
+                log.info("--- 未编队单位 → ({},{}) {} 个单位 ---",
+                        target.getX(), target.getY(), unassigned.size());
+                planOneSquad(unassigned, target, enemies);
+            }
+        } else if (target != null) {
+            // ===== 无编队模式：全部去全局目标 =====
+            log.info("目标位置: ({}, {})", target.getX(), target.getY());
+            List<GameUnit> allUnits = new ArrayList<>(myUnits.values());
+            log.info("己方单位 ({}个)", allUnits.size());
+            log.info("敌方单位 ({}个)", enemies.size());
+            planOneSquad(allUnits, target, enemies);
+        }
+
+        log.info("最长路径: {} 步", maxPathLen);
+        log.info("========== 移动规划结束 ==========");
+        recordSnapshot();
+    }
+
+    /** 规划一个编队/组到指定目标 */
+    private void planOneSquad(List<GameUnit> units, Position targetPos, List<IUnit> enemies) {
+        List<IUnit> iunits = new ArrayList<>(units);
+        Map<Integer, Position> steps = coordinator.planSquadMovement(
+                iunits, targetPos, enemies, aggressiveness, config, resTable, vacated);
+        firstSteps.putAll(steps);
+
+        for (GameUnit u : units) {
             List<Position> path = new ArrayList<>();
-            Position next = firstSteps.get(u.getId());
+            Position next = steps.get(u.getId());
             if (next != null) {
-                // 从预留表重建路径（即使第一步是原地等待，后续也会移动）
                 path = reconstructPathFromReservations(u.getId());
                 if (path.isEmpty() && !next.equals(u.getPos())) {
-                    // 预留表中没有完整路径（可能只有1步），用第一步兜底
                     path.add(next);
                 }
                 maxPathLen = Math.max(maxPathLen, path.size());
             }
             fullPaths.put(u.getId(), path);
-
-            // ===== 日志：每个单位的路径 =====
-            // 过滤掉纯等待路径（仅包含起点位置没有实际移动的）
-            boolean realMove = !path.isEmpty() && !(path.size() == 1 && path.get(0).equals(u.getPos()));
-            if (realMove) {
-                int maxShow = 30; // 最多显示前30步
-                String pathStr;
-                if (path.size() <= maxShow) {
-                    pathStr = path.stream()
-                            .map(p -> String.format("(%d,%d)", p.getX(), p.getY()))
-                            .collect(Collectors.joining(" → "));
-                } else {
-                    String head = path.subList(0, 15).stream()
-                            .map(p -> String.format("(%d,%d)", p.getX(), p.getY()))
-                            .collect(Collectors.joining(" → "));
-                    String tail = path.subList(path.size() - 3, path.size()).stream()
-                            .map(p -> String.format("(%d,%d)", p.getX(), p.getY()))
-                            .collect(Collectors.joining(" → "));
-                    pathStr = head + " → ...(" + (path.size() - 18) + "步)... → " + tail;
-                }
-                String waitNote = path.get(0).equals(u.getPos()) ? " (第1步原地等待)" : "";
-                log.info("单位 {} ({}id={}) 路径 ({}步){}: 起点({},{}) → {}",
-                        u.type.name(), u.getPlayerId() == myPlayerId ? "" : "敌",
-                        u.getId(), path.size(), waitNote,
-                        u.getPos().getX(), u.getPos().getY(), pathStr);
-            } else {
-                log.info("单位 {} (id={}) 完全无法移动，保持在 ({},{})",
-                        u.type.name(), u.getId(), u.getPos().getX(), u.getPos().getY());
-            }
+            logUnitPath(u, path);
         }
+    }
 
-        log.info("最长路径: {} 步", maxPathLen);
-        log.info("========== 移动规划结束 ==========");
-
-        // 记录初始快照 (step 0)
-        recordSnapshot();
+    private void logUnitPath(GameUnit u, List<Position> path) {
+        boolean realMove = !path.isEmpty() && !(path.size() == 1 && path.get(0).equals(u.getPos()));
+        if (realMove) {
+            int maxShow = 30;
+            String pathStr;
+            if (path.size() <= maxShow) {
+                pathStr = path.stream().map(p -> String.format("(%d,%d)", p.getX(), p.getY()))
+                        .collect(Collectors.joining(" → "));
+            } else {
+                String head = path.subList(0, 15).stream().map(p -> String.format("(%d,%d)", p.getX(), p.getY()))
+                        .collect(Collectors.joining(" → "));
+                String tail = path.subList(path.size() - 3, path.size()).stream().map(p -> String.format("(%d,%d)", p.getX(), p.getY()))
+                        .collect(Collectors.joining(" → "));
+                pathStr = head + " → ...(" + (path.size() - 18) + "步)... → " + tail;
+            }
+            String waitNote = path.get(0).equals(u.getPos()) ? " (第1步原地等待)" : "";
+            int sid = getUnitSquad(u.getId());
+            String tag = sid > 0 ? "[编队" + sid + "] " : "";
+            log.info("{}单位 {} ({}id={}) 路径 ({}步){}: 起点({},{}) → {}",
+                    tag, u.type.name(), u.getPlayerId() == myPlayerId ? "" : "敌",
+                    u.getId(), path.size(), waitNote, u.getPos().getX(), u.getPos().getY(), pathStr);
+        } else {
+            log.info("单位 {} (id={}) 完全无法移动，保持在 ({},{})",
+                    u.type.name(), u.getId(), u.getPos().getX(), u.getPos().getY());
+        }
     }
 
     /** 从预留表中重建单位路径（跳过 step=0 起始位置 + 连续相同位置） */
