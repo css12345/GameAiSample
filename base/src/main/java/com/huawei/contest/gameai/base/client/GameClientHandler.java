@@ -21,6 +21,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 
 import java.util.ArrayList;
+import java.util.List;
 
 @Slf4j
 public class GameClientHandler extends SimpleChannelInboundHandler<String> {
@@ -34,8 +35,15 @@ public class GameClientHandler extends SimpleChannelInboundHandler<String> {
 
     private final Registration gameRegistration;
 
+    private final TurnStrategy turnStrategy;
+
     public GameClientHandler(Registration gameRegistration) {
+        this(gameRegistration, TurnStrategy.NO_OP);
+    }
+
+    public GameClientHandler(Registration gameRegistration, TurnStrategy turnStrategy) {
         this.gameRegistration = gameRegistration;
+        this.turnStrategy = turnStrategy == null ? TurnStrategy.NO_OP : turnStrategy;
     }
 
     @Override
@@ -102,7 +110,11 @@ public class GameClientHandler extends SimpleChannelInboundHandler<String> {
         Ready gameReady = new Ready();
         gameReady.setPlayerId(gameRegistration.getPlayerId());
         log.info("gameStart is {}", gameStart);
-        // TODO: 完成游戏准备操作
+        try {
+            turnStrategy.onGameStart(gameStart, gameRegistration.getPlayerId());
+        } catch (Exception ex) {
+            log.error("TurnStrategy onGameStart failed: {}", ExceptionUtils.getStackTrace(ex));
+        }
         return new ReadyMessage(gameReady);
     }
 
@@ -111,8 +123,16 @@ public class GameClientHandler extends SimpleChannelInboundHandler<String> {
         gameActions.setPlayerId(gameRegistration.getPlayerId());
         gameActions.setRound(gameInquire.getRound());
         log.info("gameInquire is {}", gameInquire);
-        // TODO: 添加行动动作
-        gameActions.setActions(new ArrayList<>());
+        try {
+            List<Object> actions = turnStrategy.onInquire(gameInquire, gameRegistration.getPlayerId());
+            if (actions == null) {
+                actions = new ArrayList<>();
+            }
+            gameActions.setActions(actions);
+        } catch (Exception ex) {
+            log.error("TurnStrategy onInquire failed: {}", ExceptionUtils.getStackTrace(ex));
+            gameActions.setActions(new ArrayList<>());
+        }
         return new ActionsMessage(gameActions);
     }
 }

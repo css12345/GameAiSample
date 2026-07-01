@@ -2,6 +2,7 @@ package com.huawei.contest.gameai.core;
 
 import com.huawei.contest.gameai.base.client.GameClient;
 import com.huawei.contest.gameai.base.client.GameHolder;
+import com.huawei.contest.gameai.core.ai.client.RTSAIClient;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
@@ -23,7 +24,10 @@ public class CoreApplication implements CommandLineRunner {
             String ip = args[1];
             int port = Integer.parseInt(args[2]);
             int playerId = Integer.parseInt(args[0]);
-            gameClient = GameClient.connect(ip, port).withPlayer(playerId, "Test Red", "v1.0");
+            RTSAIClient aiClient = new RTSAIClient();
+            gameClient = GameClient.connect(ip, port)
+                    .withPlayer(playerId, "Test Red", "v1.0")
+                    .withTurnStrategy(aiClient);
             gameClient.start();
             while (!GameHolder.isGameOver()) {
                 Thread.sleep(500);

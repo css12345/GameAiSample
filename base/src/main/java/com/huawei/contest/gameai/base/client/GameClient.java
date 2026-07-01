@@ -31,6 +31,8 @@ public class GameClient {
 
     private Registration gameRegistration = new Registration();
 
+    private TurnStrategy turnStrategy = TurnStrategy.NO_OP;
+
     private GameClient(String host, int port) {
         this.host = host;
         this.port = port;
@@ -71,6 +73,14 @@ public class GameClient {
     }
 
     /**
+     * 指定回合决策策略（AI）。未调用时使用 NO_OP（每回合空动作）。
+     */
+    public GameClient withTurnStrategy(TurnStrategy strategy) {
+        this.turnStrategy = strategy == null ? TurnStrategy.NO_OP : strategy;
+        return this;
+    }
+
+    /**
      * 启动客户端
      */
     public void start() {
@@ -80,7 +90,7 @@ public class GameClient {
         bootstrap.group(receivingGroup)
                 .channel(NioSocketChannel.class)
                 .remoteAddress(new InetSocketAddress(host, port))
-                .handler(new GameClientInitializer(gameRegistration));
+                .handler(new GameClientInitializer(gameRegistration, turnStrategy));
         Executors.newSingleThreadExecutor().execute(() -> {
             while (true) {
                 if (GameHolder.isGameOver()) {
