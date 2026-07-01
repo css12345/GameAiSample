@@ -219,6 +219,13 @@ public class MovementSimulator {
         coordinator = new MovementCoordinator(world);
         List<IUnit> enemies = new ArrayList<>(enemyUnits.values());
 
+        // 关键：把所有己方单位的起始位置标记为"腾空"，允许跨编队单位穿过彼此起点。
+        // 每个单位的 step=0 会被预留表保护，不会冲突。
+        // 这样编队1 规划时不会被编队2 的单位（尚未规划）挡住对角线。
+        for (GameUnit u : myUnits.values()) {
+            vacated.add(u.getPos());
+        }
+
         log.info("========== 移动规划开始 ==========");
         log.info("地图: {}x{}, 攻击性: {}, maxSteps: {}",
                 world.getWidth(), world.getHeight(),

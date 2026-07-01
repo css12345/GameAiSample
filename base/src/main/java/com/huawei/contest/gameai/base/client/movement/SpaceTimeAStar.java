@@ -81,15 +81,13 @@ public class SpaceTimeAStar {
 
             for (GridNode next : neighbors) {
                 int nextStep = current.step + 1;
-                // 1. 预留检查
+                // 1. 预留检查（硬约束：不能撞已预留格）
                 if (resTable.getReservation(nextStep, next.getX(), next.getY(), graph.getWidth()) != -1) {
                     continue;
                 }
-                // 2. 威胁阻断
-                if (threatMap != null && maxDangerThreshold > 0 &&
-                        threatMap.getDanger(next.getX(), next.getY()) > maxDangerThreshold) {
-                    continue;
-                }
+                // 2. 威胁：作为软成本处理（getDangerCost 已加高额成本），
+                //    不硬阻断，避免单位被威胁区完全包围时动弹不得。
+                //    A* 会优先选低威胁路径，无安全路时才穿越威胁。
                 String key = stateKey(next.getX(), next.getY(), nextStep);
                 if (visited.containsKey(key)) {
                     continue;
