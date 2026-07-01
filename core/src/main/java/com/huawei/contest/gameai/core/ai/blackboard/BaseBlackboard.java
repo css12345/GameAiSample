@@ -2,6 +2,8 @@ package com.huawei.contest.gameai.core.ai.blackboard;
 
 import com.huawei.contest.gameai.base.client.entity.Position;
 import com.huawei.contest.gameai.core.ai.config.RTSConfig;
+import com.huawei.contest.gameai.core.ai.strategy.GoalExecutor;
+import com.huawei.contest.gameai.core.ai.strategy.GoalType;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -43,6 +45,17 @@ public class BaseBlackboard {
 
     // ===== 配置 =====
     private RTSConfig config = new RTSConfig();
+
+    // ===== 目标执行器（按目标类型） =====
+    private Map<GoalType, GoalExecutor> executors = new HashMap<>();
+
+    public GoalExecutor getExecutor(GoalType type) {
+        return executors.get(type);
+    }
+
+    public void registerExecutor(GoalType type, GoalExecutor executor) {
+        executors.put(type, executor);
+    }
 
     /** 清空回合间临时状态（信号、火力分配、已过期的支援请求） */
     public void cleanRequests() {
