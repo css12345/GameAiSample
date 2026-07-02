@@ -108,6 +108,11 @@ public class GameWorldState implements IWorldState {
         }
     }
 
+    /** 获取所有资源（金矿/宝石矿） */
+    public Map<Integer, GameResource> getResources() {
+        return resources;
+    }
+
     @Override
     public List<? extends IUnit> getMyUnits() {
         return units.values().stream()
