@@ -86,14 +86,16 @@ public class RTSGoalGenerator implements IGoalGenerator {
                 break;
         }
 
-        // 4. 守护者堵路/守富矿 → 清野
-        for (IUnit u : world.getEnemyUnits()) {
-            if (!(u instanceof GameUnit gu) || gu.type != UnitType.GUARDIAN || !u.isAlive()) continue;
-            if (isBlockingPath(world, gu) || hasNearbyRichResource(world, gu)) {
-                StrategicGoal clear = new StrategicGoal(GoalType.CLEAR_GUARDIAN, gu.getPos(), 3, 0.8);
-                clear.requiredRoles = Map.of(UnitType.ROCKET, 1, UnitType.MEDIC, 2);
-                clear.targetEntityId = gu.getId();
-                goals.add(clear);
+        // 4. 守护者堵路/守富矿 → 清野（守护者 playerId=-1 中立，不在 getEnemyUnits，需遍历全部单位）
+        if (world instanceof GameWorldState gws) {
+            for (IUnit u : gws.getUnits().values()) {
+                if (!(u instanceof GameUnit gu) || gu.type != UnitType.GUARDIAN || !u.isAlive()) continue;
+                if (isBlockingPath(world, gu) || hasNearbyRichResource(world, gu)) {
+                    StrategicGoal clear = new StrategicGoal(GoalType.CLEAR_GUARDIAN, gu.getPos(), 3, 0.8);
+                    clear.requiredRoles = Map.of(UnitType.ROCKET, 1, UnitType.MEDIC, 2);
+                    clear.targetEntityId = gu.getId();
+                    goals.add(clear);
+                }
             }
         }
 
